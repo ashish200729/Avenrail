@@ -1163,7 +1163,7 @@ fn nvm_bin_candidates(home: &Path, name: &str) -> Vec<PathBuf> {
             versions.push((version, bin));
         }
     }
-    versions.sort_by(|a, b| b.0.cmp(&a.0));
+    versions.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     versions.into_iter().map(|(_, bin)| bin).collect()
 }
 
