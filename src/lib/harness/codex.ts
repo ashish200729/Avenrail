@@ -54,6 +54,10 @@ type Resume = {
   cwd: string;
 };
 
+const STARTUP_TIMEOUT_MS = 60_000;
+const TURN_START_TIMEOUT_MS = 45_000;
+const MAX_STDERR_LINES = 20;
+
 const liveByThread = new Map<string, Live>();
 const resumeByThread = new Map<string, Resume>();
 const cancelledThreads = new Set<string>();
@@ -203,6 +207,7 @@ async function ensureLive(input: SendTurnInput): Promise<Live> {
 
   const { path } = await resolveCodexBinaryImpl();
   const liveRef: { current: Live | null } = { current: null };
+  const stderr: string[] = [];
 
   const rpc = new JsonRpcClient(
     input.sessionId,
@@ -225,31 +230,39 @@ async function ensureLive(input: SendTurnInput): Promise<Live> {
     input.sessionId,
     (line) => rpc.pushLine(line),
     (code) => {
-      rpc.close(new Error("Codex app-server exited"));
+      const error = codexExitError(code, stderr);
+      rpc.close(error);
       liveByThread.delete(input.sessionId);
-      input.onEvent({ type: "session.ended", code });
       const live = liveRef.current;
-      live?.turnFailed?.(new Error("Codex app-server exited"));
+      (live?.onEvent ?? input.onEvent)({ type: "session.ended", code });
+      live?.turnFailed?.(error);
       if (live) {
         live.turnDone = null;
         live.turnFailed = null;
       }
     },
+    (line) => {
+      stderr.push(line);
+      if (stderr.length > MAX_STDERR_LINES) stderr.shift();
+    },
   );
 
-  await spawnChild(input.sessionId, path, ["app-server"], input.cwd);
-
   try {
-    await rpc.request("initialize", {
-      clientInfo: {
-        name: "monocode",
-        title: "MonoCode",
-        version: "0.1.0",
+    await spawnChild(input.sessionId, path, ["app-server"], input.cwd);
+    await rpc.request(
+      "initialize",
+      {
+        clientInfo: {
+          name: "avenrail",
+          title: "Avenrail",
+          version: "0.1.0",
+        },
+        capabilities: {
+          experimentalApi: true,
+        },
       },
-      capabilities: {
-        experimentalApi: true,
-      },
-    });
+      STARTUP_TIMEOUT_MS,
+    );
     await rpc.notify("initialized", undefined);
 
     const model = nativeModelId(input.model);
@@ -272,6 +285,7 @@ async function ensureLive(input: SendTurnInput): Promise<Live> {
               serviceTier,
             }),
           },
+          STARTUP_TIMEOUT_MS,
         );
         threadId = opened.thread?.id ?? resume.threadId;
         didResume = true;
@@ -290,6 +304,7 @@ async function ensureLive(input: SendTurnInput): Promise<Live> {
           model,
           serviceTier,
         }),
+        STARTUP_TIMEOUT_MS,
       );
       threadId = opened.thread?.id?.trim();
     }
@@ -374,6 +389,7 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
     const response = await live.rpc.request<{ turn?: { id?: string } }>(
       "turn/start",
       params,
+      TURN_START_TIMEOUT_MS,
     );
     const turnId = response.turn?.id;
     if (turnId) {
@@ -383,15 +399,21 @@ async function runTurn(live: Live, input: SendTurnInput): Promise<void> {
     await turnPromise;
   } catch (error) {
     if (live.cancelled) return;
-    live.onEvent({
-      type: "session.error",
-      message: error instanceof Error ? error.message : String(error),
-    });
     throw error;
   } finally {
     live.turnDone = null;
     live.turnFailed = null;
   }
+}
+
+function codexExitError(code: number | null, stderr: string[]): Error {
+  const status = code == null ? "" : ` (code ${code})`;
+  const detail = stderr.join("\n").trim();
+  return new Error(
+    detail
+      ? `Codex app-server exited${status}: ${detail}`
+      : `Codex app-server exited${status}`,
+  );
 }
 
 function handleNotification(

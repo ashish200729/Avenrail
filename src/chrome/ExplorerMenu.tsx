@@ -1,10 +1,12 @@
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { Check } from "lucide-react";
@@ -26,13 +28,19 @@ type Props = {
   y: number;
   items: ExplorerMenuItem[];
   ariaLabel?: string;
+  compact?: boolean;
+  anchor?: RefObject<HTMLButtonElement | null>;
   onPick: (id: string) => void;
-  onClose: () => void;
+  onClose: (restoreFocus?: boolean) => void;
 };
 
 const MENU_WIDTH = 228;
 
-function itemIndexAt(items: ExplorerMenuItem[], start: number, dir: 1 | -1): number {
+function itemIndexAt(
+  items: ExplorerMenuItem[],
+  start: number,
+  dir: 1 | -1,
+): number {
   let i = start;
   while (i >= 0 && i < items.length) {
     const item = items[i];
@@ -47,10 +55,13 @@ export function ExplorerMenu({
   y,
   items,
   ariaLabel = "File actions",
+  compact = false,
+  anchor,
   onPick,
   onClose,
 }: Props) {
   const menu = useRef<HTMLDivElement>(null);
+  const menuId = useId();
   const [pos, setPos] = useState({ left: x, top: y });
   const [active, setActive] = useState(() => itemIndexAt(items, 0, 1));
   const onCloseRef = useRef(onClose);
@@ -59,7 +70,9 @@ export function ExplorerMenu({
   const ids = useMemo(
     () =>
       items.flatMap((item, index) =>
-        item.kind === "item" ? [{ index, id: item.id, disabled: !!item.disabled }] : [],
+        item.kind === "item"
+          ? [{ index, id: item.id, disabled: !!item.disabled }]
+          : [],
       ),
     [items],
   );
@@ -88,14 +101,24 @@ export function ExplorerMenu({
   }, [pos]);
 
   useEffect(() => {
+    menu.current
+      ?.querySelector<HTMLElement>(`[data-item-index="${active}"]`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [active]);
+
+  useEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
-      if (!menu.current?.contains(e.target as Node)) onCloseRef.current();
+      if (
+        !menu.current?.contains(e.target as Node) &&
+        !anchor?.current?.contains(e.target as Node)
+      )
+        onCloseRef.current(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
-      onCloseRef.current();
+      onCloseRef.current(true);
     };
     window.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("keydown", onKey, true);
@@ -103,7 +126,7 @@ export function ExplorerMenu({
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKey, true);
     };
-  }, []);
+  }, [anchor]);
 
   const move = (dir: 1 | -1) => {
     const from = ids.findIndex((item) => item.index === active);
@@ -112,6 +135,18 @@ export function ExplorerMenu({
   };
 
   const onMenuKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (e.key === "Tab") {
+      e.preventDefault();
+      onCloseRef.current(true);
+      return;
+    }
+    if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      const next = e.key === "Home" ? ids[0] : ids[ids.length - 1];
+      if (next) setActive(next.index);
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       move(1);
@@ -122,7 +157,7 @@ export function ExplorerMenu({
       move(-1);
       return;
     }
-    if (e.key === "Enter") {
+    if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       const item = items[active];
       if (item?.kind === "item" && !item.disabled) onPick(item.id);
@@ -135,16 +170,20 @@ export function ExplorerMenu({
       role="menu"
       tabIndex={-1}
       aria-label={ariaLabel}
+      aria-activedescendant={
+        items[active]?.kind === "item" ? `${menuId}-${active}` : undefined
+      }
       onKeyDown={onMenuKey}
       onContextMenu={(e) => e.preventDefault()}
       style={{
         position: "fixed",
         left: pos.left,
         top: pos.top,
-        width: MENU_WIDTH,
+        width: Math.min(MENU_WIDTH, Math.max(0, window.innerWidth - 16)),
+        maxHeight: "calc(100dvh - 16px)",
         zIndex: 80,
       }}
-      className="rounded-xl border border-content/10 bg-content/10 p-1 shadow-xl backdrop-blur-xl outline-none"
+      className={`app-scrollbar overflow-y-auto overscroll-contain p-1 shadow-xl outline-none ${compact ? "rounded-lg border border-content/15 bg-background-base" : "rounded-xl border border-content/10 bg-content/10 backdrop-blur-xl"}`}
     >
       {items.map((item, index) => {
         if (item.kind === "sep") {
@@ -161,6 +200,9 @@ export function ExplorerMenu({
           <button
             key={item.id}
             type="button"
+            id={`${menuId}-${index}`}
+            data-item-index={index}
+            tabIndex={-1}
             role={item.checked == null ? "menuitem" : "menuitemcheckbox"}
             aria-checked={item.checked}
             disabled={item.disabled}
@@ -169,7 +211,7 @@ export function ExplorerMenu({
             onClick={() => {
               if (!item.disabled) onPick(item.id);
             }}
-            className={`flex h-7 w-full items-center gap-3 rounded-lg px-2 text-left text-[13px] leading-none ${
+            className={`flex w-full items-center gap-3 px-2 text-left ${compact ? "min-h-8 rounded-md py-1.5 text-xs leading-5" : "h-7 rounded-lg text-[13px] leading-none"} ${
               item.disabled
                 ? "text-content/30"
                 : item.danger
@@ -181,11 +223,17 @@ export function ExplorerMenu({
                     : "text-content hover:bg-content/5"
             }`}
           >
-            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            <span
+              className={`min-w-0 flex-1 ${compact ? "break-words" : "truncate"}`}
+            >
+              {item.label}
+            </span>
             {item.checked ? (
               <Check className="size-3.5 shrink-0" strokeWidth={2.25} />
             ) : item.shortcut ? (
-              <span className="shrink-0 text-[11px] text-content/40">
+              <span
+                className={`shrink-0 ${compact ? "text-xs text-content/55" : "text-[11px] text-content/40"}`}
+              >
                 {item.shortcut}
               </span>
             ) : null}

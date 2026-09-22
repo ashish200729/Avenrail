@@ -93,6 +93,38 @@ html:not(.is-mac) ::-webkit-scrollbar-corner {
   background: transparent;
 }
 
+/* Subtle scrollbars for conversations, composers, and the sidebar popup,
+   including macOS with Always Show Scrollbars. Editors and terminals stay native. */
+html .app-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+html .app-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html .app-scrollbar::-webkit-scrollbar-thumb {
+  min-height: 28px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-content) 24%, transparent);
+}
+
+html .app-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-content) 40%, transparent);
+}
+
+html .app-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  html .app-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-content) 24%, transparent) transparent;
+  }
+}
+
 html.is-mac,
 html.is-mac body,
 html.is-mac #root {
@@ -116,6 +148,86 @@ html.is-mac .sidebar-glass {
 
 .body-glass {
   background: var(--color-background-base);
+}
+
+/* Keep navigation and tools bounded as the window narrows. The tools float
+   above the workspace at compact desktop widths so the composer stays usable. */
+.project-sidebar {
+  max-width: 35vw;
+}
+
+.sidebar-session-row {
+  background: transparent;
+}
+
+.sidebar-session-row:hover {
+  background: color-mix(in srgb, var(--color-content) 4%, transparent);
+}
+
+.sidebar-session-row[data-active] {
+  background: color-mix(in srgb, var(--color-content) 9%, transparent);
+}
+
+.sidebar-session-row[data-approval] {
+  outline: 1px dashed color-mix(in srgb, var(--color-content) 30%, transparent);
+  outline-offset: -1px;
+}
+
+.sidebar-session-meta {
+  color: color-mix(in srgb, var(--color-content) 65%, transparent);
+}
+
+.sidebar-diff-add { color: #34d399; }
+.sidebar-diff-delete { color: #f87171; }
+.sidebar-session-approval { color: #fbbf24; }
+.sidebar-session-working { color: var(--color-accent); }
+.sidebar-session-done { color: #34d399; }
+html.theme-light .sidebar-diff-add { color: #15803d; }
+html.theme-light .sidebar-diff-delete { color: #b91c1c; }
+html.theme-light .sidebar-session-approval { color: #92400e; }
+html.theme-light .sidebar-session-working { color: #1d4ed8; }
+html.theme-light .sidebar-session-done { color: #15803d; }
+
+.workspace-panel {
+  max-width: calc(100% - 360px);
+  container-type: inline-size;
+  container-name: workspace;
+}
+
+.workspace-file-rail {
+  width: clamp(220px, 31cqw, 300px);
+  max-width: 45%;
+}
+
+.workspace-panel-expanded {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  width: 100% !important;
+  max-width: 100%;
+}
+
+html.is-mac.glass-body .workspace-panel-expanded.body-glass,
+html.is-mac.glass-body .workspace-panel.body-glass {
+  background: var(--color-background-base);
+}
+
+@media (max-width: 1100px) {
+  .workspace-panel[data-reserve-traffic-lights] .workspace-panel-header {
+    padding-left: 88px;
+  }
+  .workspace-panel {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 30;
+    max-width: 100%;
+    background: var(--color-background-base);
+    box-shadow: -12px 0 24px hsl(0 0% 0% / 0.12);
+  }
+}
+
+@container workspace (max-width: 580px) {
+  .workspace-file-rail { width: 190px; max-width: 44%; }
 }
 
 .transcript-turn {
@@ -145,9 +257,9 @@ input,
 .agent-transcript,
 .markdown-preview,
 .inbox-pr-diff,
-.monocode-terminal,
-.monocode-terminal .xterm,
-.monocode-terminal .xterm-viewport {
+.avenrail-terminal,
+.avenrail-terminal .xterm,
+.avenrail-terminal .xterm-viewport {
   user-select: text;
 }
 
@@ -164,11 +276,133 @@ html.is-resizing * {
   user-select: none !important;
 }
 
-.composer-toolbar {
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
+.chrome-icon-button {
+  width: 28px;
+  height: 28px;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.chrome-icon-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chrome-icon-button { transition: none; }
+}
+
+/* Keep inline controls when they fit. The clipped, inert measurement host
+   preserves their intrinsic width without exposing duplicate controls. */
+.composer-footer {
+  padding-top: 8px;
+}
+
+/* Keep secondary choices quiet; the model and Send/Stop remain easy to find. */
+.composer-footer .composer-inline-options button[aria-haspopup],
+.composer-footer .composer-options-trigger,
+.composer-footer .composer-controls > button[data-composer-fixed] {
+  background-color: transparent;
+}
+
+.composer-footer .composer-model-picker > button {
+  background-color: color-mix(in srgb, var(--color-content) 5%, transparent);
+}
+
+.composer-footer .composer-inline-options button[aria-haspopup]:enabled:hover,
+.composer-footer .composer-options-trigger:enabled:hover,
+.composer-footer .composer-controls > button[data-composer-fixed]:enabled:hover,
+.composer-footer .composer-model-picker > button:hover {
+  background-color: color-mix(in srgb, var(--color-content) 8%, transparent);
+}
+
+.composer-footer .composer-inline-options button[aria-expanded="true"],
+.composer-footer .composer-options-trigger[aria-expanded="true"],
+.composer-footer .composer-model-picker > button[aria-expanded="true"] {
+  background-color: color-mix(in srgb, var(--color-content) 10%, transparent);
+}
+
+.composer-controls > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Branch context stays beside Send/Stop without taking over a narrow toolbar. */
+.composer-controls > .composer-submit-controls {
+  max-width: 40%;
+}
+
+.composer-branch-picker {
+  min-width: 26px;
+  max-width: 8rem;
+  flex: 0 1 auto;
+}
+
+.composer-branch-picker > div > button {
+  height: 26px;
+  max-width: 100%;
+  padding: 0 6px;
+  border-radius: 6px;
+}
+
+.composer-branch-picker > div > button:enabled:hover,
+.composer-branch-picker > div > button[aria-expanded="true"] {
+  background-color: color-mix(in srgb, var(--color-content) 8%, transparent);
+}
+
+.composer-branch-picker > div > button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.composer-controls > button[aria-haspopup="dialog"]:not(.composer-options-trigger) {
+  max-width: min(13rem, 100%);
+}
+
+.composer-controls > .composer-options-trigger {
+  max-width: min(8rem, 35%);
+}
+
+.composer-controls > div > button {
+  max-width: 100%;
+}
+
+.composer-model-picker {
+  flex: 0 1 auto;
+  max-width: 13rem;
+}
+
+.composer-model-picker > button {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.composer-inline-options {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  max-width: none;
+}
+
+.composer-inline-options:empty {
+  display: none;
+}
+
+.composer-inline-measure {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Percentage padding follows the pane width without containment, so fixed
+   model/settings menus keep their viewport-based positioning. */
+.empty-session-content {
+  padding: 48px clamp(12px, 4%, 24px);
 }
 
 .composer-field {
@@ -178,15 +412,14 @@ html.is-resizing * {
 }
 
 .composer-field::placeholder {
-  color: color-mix(in srgb, var(--color-content) 40%, transparent);
+  color: color-mix(in srgb, var(--color-content) 60%, transparent);
   -webkit-text-fill-color: color-mix(
     in srgb,
-    var(--color-content) 40%,
+    var(--color-content) 60%,
     transparent
   );
 }
 
-.composer-toolbar::-webkit-scrollbar,
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
@@ -559,43 +792,51 @@ html.is-resizing * {
   }
 }
 
-.monocode-terminal {
+.avenrail-terminal {
   box-sizing: border-box;
   overflow: hidden;
   /* Shell padding; full-screen TUIs use the alt buffer and drop to 0. */
   padding: 8px 10px;
 }
 
-.monocode-terminal--alt-screen {
+.avenrail-terminal--alt-screen {
   padding: 0;
 }
 
-.monocode-terminal--alt-screen .monocode-terminal-host,
-.monocode-terminal--alt-screen .xterm,
-.monocode-terminal--alt-screen .xterm-viewport,
-.monocode-terminal--alt-screen .xterm-scrollable-element {
+.avenrail-terminal--alt-screen .avenrail-terminal-host,
+.avenrail-terminal--alt-screen .xterm,
+.avenrail-terminal--alt-screen .xterm-viewport,
+.avenrail-terminal--alt-screen .xterm-scrollable-element {
   width: 100%;
   height: 100%;
 }
 
-.monocode-terminal--alt-screen .xterm .xterm-scrollable-element > .scrollbar {
+/* Terminals without scrollback have nothing to scroll. Keep the six-pixel gutter
+   reserved so showing the thumb later does not resize the shell or reflow text. */
+.avenrail-terminal:not(.avenrail-terminal--scrollback) .xterm .xterm-scrollable-element > .scrollbar,
+.avenrail-terminal--alt-screen .xterm .xterm-scrollable-element > .scrollbar {
   display: none !important;
 }
 
-.monocode-terminal .xterm {
+.avenrail-terminal .xterm {
   padding: 0;
 }
 
-.monocode-terminal .xterm-viewport {
+.avenrail-terminal .xterm-viewport {
   background: transparent !important;
   overflow: hidden;
 }
 
-.monocode-terminal .xterm-scrollable-element > .shadow {
+.avenrail-terminal .xterm-scrollable-element > .shadow {
   display: none !important;
 }
 
-.monocode-terminal .xterm-screen {
+/* xterm owns the scrollbar width and terminal fit; only soften its shape here. */
+.avenrail-terminal .xterm-scrollable-element > .scrollbar > .slider {
+  border-radius: 999px;
+}
+
+.avenrail-terminal .xterm-screen {
   user-select: text;
 }
 

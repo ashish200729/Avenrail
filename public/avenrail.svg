@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <title>Avenrail</title>
+  <rect x="64" y="64" width="896" height="896" rx="206" fill="#D9EDE5"/>
+  <path d="M280 728 469 324c17-36 69-36 86 0l189 404" stroke="#183E36" stroke-width="88" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M376 584h272" stroke="#183E36" stroke-width="80" stroke-linecap="round"/>
+  <path d="m680 332 64-64" stroke="#527E70" stroke-width="48" stroke-linecap="round"/>
+</svg>

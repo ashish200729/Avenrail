@@ -106,25 +106,45 @@ export function sanitizeSessionForPersist(
  * `session_upsert` runs off the main thread, so two writes for the same
  * session could otherwise land in either order and let an older transcript
  * overwrite a newer one. Chain them per session; different sessions still
- * write concurrently.
+ * write concurrently. Archive and delete share the queue so they cannot overtake
+ * a pending snapshot.
  */
-const upsertQueues = new Map<string, Promise<unknown>>();
+const sessionWriteQueues = new Map<string, Promise<unknown>>();
+const sessionDeletions = new Map<string, Promise<void>>();
+
+function queueSessionWrite<T>(
+  sessionId: string,
+  write: () => Promise<T>,
+): Promise<T> {
+  const previous = sessionWriteQueues.get(sessionId) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(write);
+  sessionWriteQueues.set(sessionId, run);
+  return run.finally(() => {
+    if (sessionWriteQueues.get(sessionId) === run) sessionWriteQueues.delete(sessionId);
+  });
+}
 
 export async function upsertSession(
   session: Session,
 ): Promise<SessionSummary | null> {
   if (!shouldPersistSession(session)) return null;
-  const payload = sanitizeSessionForPersist(session);
-  const previous = upsertQueues.get(session.id) ?? Promise.resolve();
-  const run = previous
-    .catch(() => undefined)
-    .then(() => invoke<SessionSummary>("session_upsert", { session: payload }));
-  upsertQueues.set(session.id, run);
-  try {
-    return normalizeSummary(await run);
-  } finally {
-    if (upsertQueues.get(session.id) === run) upsertQueues.delete(session.id);
+  const deletion = sessionDeletions.get(session.id);
+  if (deletion) {
+    // A late streaming snapshot must not recreate a deleted conversation.
+    // If deletion fails, the live session remains open and can still be saved.
+    try {
+      await deletion;
+      return null;
+    } catch {
+      // Resume normal persistence after the failed deletion.
+    }
   }
+  const payload = sanitizeSessionForPersist(session);
+  return normalizeSummary(
+    await queueSessionWrite(session.id, () =>
+      invoke<SessionSummary>("session_upsert", { session: payload }),
+    ),
+  );
 }
 
 export function persistFingerprint(session: Session): string {
@@ -189,14 +209,28 @@ export async function getSession(sessionId: string): Promise<Session | null> {
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  await invoke<void>("session_delete", { sessionId });
+  const existing = sessionDeletions.get(sessionId);
+  if (existing) return existing;
+  const run = queueSessionWrite(sessionId, () =>
+    invoke<void>("session_delete", { sessionId }),
+  );
+  sessionDeletions.set(sessionId, run);
+  try {
+    await run;
+    // Keep the successful promise as a tombstone for this renderer's lifetime.
+  } catch (error) {
+    if (sessionDeletions.get(sessionId) === run) sessionDeletions.delete(sessionId);
+    throw error;
+  }
 }
 
 export async function setSessionArchived(
   sessionId: string,
   archived: boolean,
 ): Promise<void> {
-  await invoke<void>("session_set_archived", { sessionId, archived });
+  await queueSessionWrite(sessionId, () =>
+    invoke<void>("session_set_archived", { sessionId, archived }),
+  );
 }
 
 export async function replaceInFlightSessions(

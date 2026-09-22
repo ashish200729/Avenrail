@@ -1,10 +1,10 @@
 import {
   Check,
   ChevronRight,
-  Clock,
+  Timer,
   CircleDashed,
-  Copy,
-  FilePlusCorner,
+  ClipboardCopy,
+  NotebookPen,
   Minus,
   X,
 } from "lucide-react";
@@ -245,7 +245,7 @@ export function AgentTranscript({
   return (
     <div
       ref={setScroller}
-      className="agent-transcript h-full overflow-y-auto overscroll-none [overflow-anchor:none] font-mono text-[13px] leading-5"
+      className="agent-transcript app-scrollbar h-full overflow-y-auto overscroll-none [overflow-anchor:none] font-mono text-[13px] leading-5"
     >
       <div className="mx-auto flex w-full min-w-0 max-w-4xl flex-col gap-1 pb-1">
         {firstVisibleTurn > 0 ? (
@@ -405,39 +405,38 @@ function TurnDuration({
       aria-label={
         waiting ? "Waiting for approval" : live ? "Agent is working" : label
       }
-      className="flex items-center gap-3 px-4 pt-1 pb-3 font-sans text-sm text-content/40"
+      className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-1 pb-3 font-sans text-xs text-content/55"
     >
+      <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        {completedAt != null ? (
+          <time className="whitespace-nowrap text-content/50" title={new Date(completedAt).toLocaleString()}>
+            {formatClockTime(completedAt)}
+          </time>
+        ) : null}
+        {!done ? <TerminalSpinner /> : null}
+        {live && !done ? (
+          <Shimmer duration={1}>{label}</Shimmer>
+        ) : showElapsed ? (
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            {done ? <Timer className="size-3.5 shrink-0" strokeWidth={1.75} aria-hidden /> : null}
+            {label}
+          </span>
+        ) : null}
+      </span>
       {done ? (
-        <span className="flex items-center gap-2">
+        <div role="group" aria-label="Response actions" className="ml-auto flex shrink-0 items-center gap-1">
           {output ? (
-            <>
-              <CopyTurnButton text={output} />
-              {onSaveNote ? (
-                <SaveNoteButton text={output} onSave={onSaveNote} />
-              ) : null}
-            </>
+            <CopyTurnButton text={output} />
           ) : (
             <Check className="size-3.5" strokeWidth={1.75} />
           )}
           {fromHarness && onSecondOpinion ? (
             <SecondOpinionButton from={fromHarness} onPick={onSecondOpinion} />
           ) : null}
-        </span>
-      ) : (
-        <TerminalSpinner />
-      )}
-
-      {live && !done ? (
-        <Shimmer duration={1}>{label}</Shimmer>
-      ) : showElapsed ? (
-        <span>{label}</span>
-      ) : null}
-
-      {completedAt != null ? (
-        <span className="flex items-center gap-1 text-content/35">
-          <Clock className="size-3.5 shrink-0" strokeWidth={1.75} />
-          {formatClockTime(completedAt)}
-        </span>
+          {output && onSaveNote ? (
+            <SaveNoteButton text={output} onSave={onSaveNote} />
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -467,7 +466,7 @@ function CopyTurnButton({ text }: { text: string }) {
       type="button"
       title={copied ? "Copied" : "Copy response"}
       aria-label={copied ? "Copied" : "Copy response"}
-      className="-ml-1 rounded-md p-1 text-content/40 hover:bg-content/8 hover:text-content/70"
+      className="grid size-7 shrink-0 place-items-center rounded-md text-content/55 hover:bg-content/8 hover:text-content focus-visible:outline-2 focus-visible:outline-accent"
       onClick={() => {
         playCue("copy");
         void copyText(text).then(
@@ -483,7 +482,7 @@ function CopyTurnButton({ text }: { text: string }) {
       {copied ? (
         <Check className="size-3.5" strokeWidth={1.75} />
       ) : (
-        <Copy className="size-3.5" strokeWidth={1.75} />
+        <ClipboardCopy className="size-3.5" strokeWidth={1.75} aria-hidden />
       )}
     </button>
   );
@@ -511,7 +510,7 @@ function SaveNoteButton({
       type="button"
       title={saved ? "Saved to Notes" : "Save as note"}
       aria-label={saved ? "Saved to Notes" : "Save as note"}
-      className="rounded-md p-1 text-content/40 hover:bg-content/8 hover:text-content/70"
+      className="grid size-7 shrink-0 place-items-center rounded-md text-content/55 hover:bg-content/8 hover:text-content focus-visible:outline-2 focus-visible:outline-accent"
       onClick={() => {
         playCue("copy");
         onSave(text);
@@ -523,7 +522,7 @@ function SaveNoteButton({
       {saved ? (
         <Check className="size-3.5" strokeWidth={1.75} />
       ) : (
-        <FilePlusCorner className="size-3.5" strokeWidth={1.75} />
+        <NotebookPen className="size-3.5" strokeWidth={1.75} aria-hidden />
       )}
     </button>
   );

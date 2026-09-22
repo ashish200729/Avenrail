@@ -1,5 +1,7 @@
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
+import { createTerminalStartup } from "../lib/terminalStartup";
+import { errorText } from "../lib/errorText";
 import {
   getPtyStatus,
   killPty,
@@ -19,6 +21,8 @@ import {
   applyTerminalChrome,
   fitTerminal,
   resetGridStretch,
+  terminalScrollbarWidth,
+  trackTerminalScrollback,
   type TerminalFitMode,
 } from "../lib/terminalLayout";
 import { IS_MAC } from "../lib/platform";
@@ -85,12 +89,22 @@ function terminalTheme(light: boolean) {
     foreground: cssColor("var(--color-content)", light ? "#2e2e2e" : "#e8eef2"),
     cursor: cssColor("var(--color-accent)", light ? "#4078f2" : "#4da3f5"),
     cursorAccent: light ? "#ffffff" : "#000000",
-    selectionBackground: light
-      ? "rgba(0,0,0,0.18)"
-      : "rgba(255,255,255,0.18)",
+    selectionBackground: light ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.18)",
     selectionInactiveBackground: light
       ? "rgba(0,0,0,0.08)"
       : "rgba(255,255,255,0.08)",
+    scrollbarSliderBackground: light
+      ? "rgba(0,0,0,0.16)"
+      : "rgba(255,255,255,0.16)",
+    scrollbarSliderHoverBackground: light
+      ? "rgba(0,0,0,0.28)"
+      : "rgba(255,255,255,0.28)",
+    scrollbarSliderActiveBackground: light
+      ? "rgba(0,0,0,0.36)"
+      : "rgba(255,255,255,0.36)",
+    // Setting a scrollbar width also enables xterm's overview ruler. Hide its
+    // default full-height border without hiding the actual scrollbar thumb.
+    overviewRulerBorder: "#00000000",
     ...(light ? ANSI_LIGHT : ANSI_DARK),
   };
 }
@@ -110,11 +124,21 @@ function oscColors() {
   return isLightScheme() ? OSC_LIGHT : OSC_DARK;
 }
 
-export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
+export function TerminalView({
+  id,
+  cwd,
+  active,
+  onMetaChange,
+}: Props) {
   const outerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
-  const spawned = useRef(false);
+  const startupRef = useRef<ReturnType<typeof createTerminalStartup> | null>(
+    null,
+  );
+  // OSC cwd reports update tab metadata, never the identity of the running shell.
+  const cwdRef = useRef(cwd);
+  cwdRef.current = cwd;
   const applySizeRef = useRef<() => void>(() => {});
   const onMetaChangeRef = useRef(onMetaChange);
   onMetaChangeRef.current = onMetaChange;
@@ -136,11 +160,39 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
       allowTransparency: true,
       smoothScrollDuration: 0,
       theme: terminalTheme(isLightScheme()),
+      overviewRuler: { width: terminalScrollbarWidth() },
       macOptionIsMeta: IS_MAC,
     });
     term.open(host);
     termRef.current = term;
+    const stopTrackingScrollback = trackTerminalScrollback(term, outer);
     let closed = false;
+    const launch = new AbortController();
+    const reportError = (error: unknown, operation: string) => {
+      if (!closed)
+        term.writeln(
+          `\r\n[Could not ${operation}: ${errorText(error, "Please try again.")}]`,
+        );
+    };
+    const startup = createTerminalStartup({
+      spawn: (cols, rows) =>
+        spawnPty(id, cwdRef.current, cols, rows, launch.signal),
+      resize: (cols, rows) => resizePty(id, cols, rows),
+      onError: (error, operation) => {
+        reportError(error, `${operation} terminal`);
+        if (operation === "start" && !closed) {
+          term.options.disableStdin = true;
+          term.writeln("[Open a new terminal to try again.]");
+        }
+      },
+    });
+    startupRef.current = startup;
+    const send = (data: string) => {
+      if (!closed && startup.acceptsInput())
+        void writePty(id, data).catch((error) => {
+          if (startup.acceptsInput()) reportError(error, "write to terminal");
+        });
+    };
 
     const onCopy = (event: ClipboardEvent) => {
       const text = term.getSelection();
@@ -171,16 +223,18 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
     });
 
     let oscBuffer = "";
+    const decoder = new TextDecoder();
 
     const unsubscribe = subscribePty(
       id,
       (data) => {
         const onMeta = onMetaChangeRef.current;
         if (onMeta) {
-          const text = new TextDecoder().decode(data);
+          const text = decoder.decode(data, { stream: true });
           const scanned = scanOscCwd(text, oscBuffer);
           oscBuffer = scanned.rest;
           if (scanned.cwd) {
+            cwdRef.current = scanned.cwd;
             const patch: TerminalMetaPatch = { cwd: scanned.cwd };
             if (!runningProcessRef.current) {
               patch.title = defaultTerminalTitle(scanned.cwd);
@@ -192,18 +246,21 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
       },
       (code) => {
         if (closed) return;
+        startup.exit();
+        runningProcessRef.current = null;
+        term.options.disableStdin = true;
         const status = code == null ? "" : ` (${code})`;
         term.writeln(`\r\n[process exited${status}]`);
       },
     );
 
     const dataSub = term.onData((data) => {
-      void writePty(id, data);
+      send(data);
     });
 
     const replyOsc = (code: 10 | 11 | 12, hex: string) => {
       const reply = oscColorReply(code, hex);
-      if (reply) void writePty(id, reply);
+      if (reply) send(reply);
       return true;
     };
     const oscFg = term.parser.registerOscHandler(10, (data) =>
@@ -226,8 +283,6 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
       return term.buffer.active.type !== "alternate";
     });
 
-    let lastCols = 0;
-    let lastRows = 0;
     let raf = 0;
     let tuiMode = false;
 
@@ -240,8 +295,6 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
       tuiMode = next;
       applyTerminalChrome(term, outer, next);
       if (!next) resetGridStretch(term);
-      lastCols = 0;
-      lastRows = 0;
       schedule();
     };
 
@@ -250,22 +303,7 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
       const next = fitTerminal(term, host, fitMode());
       if (!next) return;
       const { cols, rows } = next;
-      if (cols === lastCols && rows === lastRows) return;
-      lastCols = cols;
-      lastRows = rows;
-      if (!spawned.current) {
-        spawned.current = true;
-        void spawnPty(id, cwd, cols, rows).catch((error) => {
-          spawned.current = false;
-          lastCols = 0;
-          lastRows = 0;
-          const message =
-            error instanceof Error ? error.message : String(error);
-          term.writeln(`\x1b[31m${message}\x1b[0m`);
-        });
-        return;
-      }
-      void resizePty(id, cols, rows);
+      void startup.setSize(cols, rows);
     };
 
     const schedule = () => {
@@ -278,7 +316,7 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
 
     applySizeRef.current = applySize;
     const renderSub = term.onRender(() => {
-      if (!spawned.current) applySize();
+      if (!startup.isRunning()) applySize();
     });
     const bufferSub = term.buffer.onBufferChange(syncAltScreenMode);
     syncAltScreenMode();
@@ -288,10 +326,12 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
 
     return () => {
       closed = true;
+      launch.abort();
+      startup.dispose();
       cancelAnimationFrame(frame);
       if (raf) cancelAnimationFrame(raf);
       observer.disconnect();
-      outer.classList.remove("monocode-terminal--alt-screen");
+      outer.classList.remove("avenrail-terminal--alt-screen");
       applySizeRef.current = () => {};
       host.removeEventListener("copy", onCopy);
       host.removeEventListener("paste", onPaste);
@@ -302,13 +342,14 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
       oscCursor.dispose();
       renderSub.dispose();
       bufferSub.dispose();
+      stopTrackingScrollback();
       unsubscribe();
       void killPty(id);
       term.dispose();
       termRef.current = null;
-      spawned.current = false;
+      startupRef.current = null;
     };
-  }, [id, cwd]);
+  }, [id]);
 
   // Identity-stable: the callers pass an inline arrow, so depending on the
   // prop itself would tear down and re-arm the poll — and re-fork `ps` — on
@@ -317,47 +358,59 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
 
   useEffect(() => {
     if (!wantsMeta) return;
+    let disposed = false;
+    let pending = false;
     let lastForeground: string | null = null;
     const refresh = () => {
-      if (!spawned.current) return;
+      if (!startupRef.current?.isRunning() || pending) return;
       // Each status read forks `ps`; an off-screen window has no title to paint.
       if (document.hidden) return;
+      pending = true;
       void getPtyStatus(id)
         .then(({ foreground }) => {
+          if (disposed || !startupRef.current?.isRunning()) return;
           const fg = foreground?.trim() || null;
           runningProcessRef.current = fg;
           if (fg === lastForeground) return;
           lastForeground = fg;
           onMetaChangeRef.current?.(
-            fg ? { title: fg } : { title: defaultTerminalTitle(cwd) },
+            fg
+              ? { title: fg }
+              : { title: defaultTerminalTitle(cwdRef.current) },
           );
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          pending = false;
+        });
     };
     refresh();
     const interval = setInterval(refresh, 1000);
     document.addEventListener("visibilitychange", refresh);
     return () => {
+      disposed = true;
       clearInterval(interval);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [id, cwd, wantsMeta]);
+  }, [id, wantsMeta]);
 
   useEffect(() => {
     if (!active) return;
     applySizeRef.current();
-    termRef.current?.focus();
+    // Arrow-key tab navigation must keep focus on the tab strip.
+    if (document.activeElement?.getAttribute("role") !== "tab")
+      termRef.current?.focus();
   }, [active]);
 
   return (
     <div
       ref={outerRef}
-      className="monocode-terminal flex h-full w-full min-h-0 min-w-0 flex-col"
+      className="avenrail-terminal flex h-full w-full min-h-0 min-w-0 flex-col"
       onMouseDown={() => termRef.current?.focus()}
     >
       <div
         ref={hostRef}
-        className="monocode-terminal-host min-h-0 min-w-0 flex-1 overflow-hidden"
+        className="avenrail-terminal-host min-h-0 min-w-0 flex-1 overflow-hidden"
       />
     </div>
   );

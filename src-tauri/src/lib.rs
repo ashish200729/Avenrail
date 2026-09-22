@@ -18,7 +18,7 @@ mod skills;
 mod window;
 mod window_transfer;
 
-// Phase 1 seam: spawn / kill harness children per MonoCode thread.
+// Phase 1 seam: spawn / kill harness children per Avenrail thread.
 // Adapters own the protocol; this host only supervises processes.
 
 /// Project directory for new sessions — prefer cwd, else home.
@@ -270,7 +270,7 @@ pub fn run() {
             project_logo::remove_project_logo,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building MonoCode");
+        .expect("error while building Avenrail");
 
     app.run(|handle, event| match event {
         #[cfg(target_os = "macos")]

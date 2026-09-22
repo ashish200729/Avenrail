@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Check,
@@ -56,6 +57,7 @@ const prByCwd = new Map<string, GitPr | null>();
 
 type Props = {
   cwd: string;
+  toolbarTarget?: HTMLElement | null;
   enabled: boolean;
   textHarness?: HarnessId;
   selectedPath?: string;
@@ -64,6 +66,7 @@ type Props = {
 
 export function GitChangesPanel({
   cwd,
+  toolbarTarget,
   enabled,
   textHarness,
   selectedPath,
@@ -80,36 +83,41 @@ export function GitChangesPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-      <header className="flex h-9 shrink-0 items-center gap-2 border-b border-content/10 px-3">
-        {(index?.additions ?? 0) > 0 || (index?.deletions ?? 0) > 0 ? (
-          <DiffCounts
-            additions={index?.additions ?? 0}
-            deletions={index?.deletions ?? 0}
-          />
-        ) : (
-          <span className="text-[12px] font-medium text-content">Changes</span>
-        )}
-        {index?.branch ? (
-          <span className="ml-auto flex min-w-0 items-center gap-1 text-[11px] text-content/50">
-            <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
-            <span className="min-w-0 truncate">{index.branch}</span>
-            {index.ahead > 0 ? (
-              <span className="shrink-0 tabular-nums text-content/40">
-                ↑{index.ahead}
-              </span>
-            ) : null}
-            {index.behind > 0 ? (
-              <span className="shrink-0 tabular-nums text-content/40">
-                ↓{index.behind}
-              </span>
-            ) : null}
-          </span>
-        ) : (
-          <span className="ml-auto" />
-        )}
-      </header>
+      {!toolbarTarget ? (
+        <header className="flex h-9 shrink-0 items-center gap-2 border-b border-content/10 px-3">
+          {(index?.additions ?? 0) > 0 || (index?.deletions ?? 0) > 0 ? (
+            <DiffCounts
+              additions={index?.additions ?? 0}
+              deletions={index?.deletions ?? 0}
+            />
+          ) : (
+            <span className="text-[12px] font-medium text-content">
+              Changes
+            </span>
+          )}
+          {index?.branch ? (
+            <span className="ml-auto flex min-w-0 items-center gap-1 text-[11px] text-content/50">
+              <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
+              <span className="min-w-0 truncate">{index.branch}</span>
+              {index.ahead > 0 ? (
+                <span className="shrink-0 tabular-nums text-content/40">
+                  ↑{index.ahead}
+                </span>
+              ) : null}
+              {index.behind > 0 ? (
+                <span className="shrink-0 tabular-nums text-content/40">
+                  ↓{index.behind}
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="ml-auto" />
+          )}
+        </header>
+      ) : null}
       <ChangedFiles
         cwd={cwd}
+        toolbarTarget={toolbarTarget}
         textHarness={textHarness}
         index={index}
         files={files}
@@ -129,6 +137,7 @@ export function GitChangesPanel({
 
 function ChangedFiles({
   cwd,
+  toolbarTarget,
   textHarness,
   index,
   files,
@@ -138,6 +147,7 @@ function ChangedFiles({
   onMutated,
 }: {
   cwd: string;
+  toolbarTarget?: HTMLElement | null;
   textHarness?: HarnessId;
   index: GitDiffIndex | null;
   files: GitChangedFile[];
@@ -152,6 +162,36 @@ function ChangedFiles({
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [commitPanelOpen, setCommitPanelOpen] = useState(false);
+  const commitPanelRef = useRef<HTMLDivElement>(null);
+  const [filter, setFilter] = useState("");
+  const matching = (file: GitChangedFile) =>
+    file.relative.toLowerCase().includes(filter.trim().toLowerCase());
+  useEffect(() => {
+    if (!enabled) {
+      setCommitPanelOpen(false);
+      setMenuOpen(false);
+    }
+  }, [enabled]);
+  useEffect(() => {
+    if (!commitPanelOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!commitPanelRef.current?.contains(event.target as Node))
+        setCommitPanelOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setCommitPanelOpen(false);
+        setMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", escape);
+    };
+  }, [commitPanelOpen]);
   const [stagedExpanded, setStagedExpanded] = useState(stagedOpen);
   const [changesExpanded, setChangesExpanded] = useState(changesOpen);
   const { pr, reload: reloadPr } = usePrStatus(cwd, index?.branch);
@@ -337,111 +377,156 @@ function ChangedFiles({
     }
   };
 
-  return (
-    <aside className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-content/10 p-2">
-        <div className="relative">
-          <textarea
-            ref={messageRef}
-            rows={1}
-            value={message}
-            placeholder={`Message (${MOD}↩ to commit)`}
-            disabled={!canEditMessage}
-            onChange={(event) => setMessage(event.target.value)}
-            onKeyDown={(event) => {
-              if (
-                (event.metaKey || event.ctrlKey) &&
-                event.key === "Enter" &&
-                canCommit
-              ) {
-                event.preventDefault();
-                void commit(false);
-              }
-            }}
-            className="max-h-40 w-full resize-none overflow-y-auto rounded-md bg-content/10 py-1 pr-8 pl-2 text-[13px] leading-5 text-content outline-none placeholder:text-content/35 disabled:opacity-40"
-          />
-          <button
-            type="button"
-            title="Generate commit message"
-            aria-label="Generate commit message"
-            disabled={!canGenerate}
-            onClick={() => void generate()}
-            className="absolute top-1 right-1 grid size-5 place-items-center rounded-md text-content bg-content/10 hover:bg-content/20 hover:text-content disabled:opacity-40"
-          >
-            {busy === "generate" ? (
-              <Loader className="size-3.5 animate-spin" strokeWidth={1.75} />
-            ) : (
-              <WandSparkles className="size-3" strokeWidth={1} />
-            )}
-          </button>
-        </div>
-        <div ref={menuRef} className="relative mt-1.5 flex">
-          <button
-            type="button"
-            disabled={!canCommit}
-            onClick={() => void commit(false)}
-            className="flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-l-md bg-content text-[12px] font-medium text-background-base disabled:opacity-40"
-          >
-            <Check className="size-3.5" strokeWidth={2} />
-            Commit
-          </button>
+  const commitControls = (
+    <div className="shrink-0 border-b border-content/10 p-2">
+      <div className="relative">
+        <textarea
+          ref={messageRef}
+          rows={1}
+          value={message}
+          placeholder={`Message (${MOD}↩ to commit)`}
+          disabled={!canEditMessage}
+          onChange={(event) => setMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if (
+              (event.metaKey || event.ctrlKey) &&
+              event.key === "Enter" &&
+              canCommit
+            ) {
+              event.preventDefault();
+              void commit(false);
+            }
+          }}
+          className="max-h-40 w-full resize-none overflow-y-auto rounded-md bg-content/10 py-1 pr-8 pl-2 text-[13px] leading-5 text-content outline-none placeholder:text-content/35 disabled:opacity-40"
+        />
+        <button
+          type="button"
+          title="Generate commit message"
+          aria-label="Generate commit message"
+          disabled={!canGenerate}
+          onClick={() => void generate()}
+          className="absolute top-1 right-1 grid size-5 place-items-center rounded-md text-content bg-content/10 hover:bg-content/20 hover:text-content disabled:opacity-40"
+        >
+          {busy === "generate" ? (
+            <Loader className="size-3.5 animate-spin" strokeWidth={1.75} />
+          ) : (
+            <WandSparkles className="size-3" strokeWidth={1} />
+          )}
+        </button>
+      </div>
+      <div ref={menuRef} className="relative mt-1.5 flex">
+        <button
+          type="button"
+          disabled={!canCommit}
+          onClick={() => void commit(false)}
+          className="flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-l-md bg-content text-[12px] font-medium text-background-base disabled:opacity-40"
+        >
+          <Check className="size-3.5" strokeWidth={2} />
+          Commit
+        </button>
 
-          <button
-            type="button"
-            title="Commit options"
-            aria-label="Commit options"
-            disabled={!canCommit}
-            onClick={() => setMenuOpen((open) => !open)}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-r-md border-l border-background-base/10 bg-content text-background-base disabled:opacity-40"
-          >
-            <ChevronDown className="size-3.5" strokeWidth={2} />
-          </button>
-          {menuOpen ? (
-            <div className="absolute top-full right-0 z-30 mt-1 min-w-48 rounded-md border border-content/10 bg-background-base py-1 shadow-lg">
-              <button
-                type="button"
-                disabled={!canCommitPush}
-                onClick={() => void commit(true)}
-                className="flex h-7 w-full items-center px-3 text-left text-[12px] text-content hover:bg-content/10 disabled:opacity-40"
-              >
-                Commit & Push
-              </button>
-              <button
-                type="button"
-                disabled={!canCommitPushPr}
-                onClick={() => void commit(true, true)}
-                className="flex h-7 w-full items-center px-3 text-left text-[12px] text-content hover:bg-content/10 disabled:opacity-40"
-              >
-                Commit, Push & Create PR
-              </button>
-            </div>
-          ) : null}
-        </div>
-        {index ? (
-          <GitSyncActions
-            index={index}
-            pr={pr}
-            busy={busy}
-            hasRemote={hasRemote}
-            hasOpenPr={hasOpenPr}
-            onDefault={onDefault}
-            canSync={canSync}
-            canPublish={canPublish}
-            canCreatePr={canCreatePr}
-            canViewPr={canViewPr}
-            onSync={() => void sync()}
-            onCreatePr={() => void createPr()}
-            onViewPr={() => {
-              if (pr?.url) void openUrl(pr.url);
-            }}
-          />
+        <button
+          type="button"
+          title="Commit options"
+          aria-label="Commit options"
+          disabled={!canCommit}
+          onClick={() => setMenuOpen((open) => !open)}
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-r-md border-l border-background-base/10 bg-content text-background-base disabled:opacity-40"
+        >
+          <ChevronDown className="size-3.5" strokeWidth={2} />
+        </button>
+        {menuOpen ? (
+          <div className="absolute top-full right-0 z-30 mt-1 min-w-48 rounded-md border border-content/10 bg-background-base py-1 shadow-lg">
+            <button
+              type="button"
+              disabled={!canCommitPush}
+              onClick={() => void commit(true)}
+              className="flex h-7 w-full items-center px-3 text-left text-[12px] text-content hover:bg-content/10 disabled:opacity-40"
+            >
+              Commit & Push
+            </button>
+            <button
+              type="button"
+              disabled={!canCommitPushPr}
+              onClick={() => void commit(true, true)}
+              className="flex h-7 w-full items-center px-3 text-left text-[12px] text-content hover:bg-content/10 disabled:opacity-40"
+            >
+              Commit, Push & Create PR
+            </button>
+          </div>
         ) : null}
       </div>
+      {index ? (
+        <GitSyncActions
+          index={index}
+          pr={pr}
+          busy={busy}
+          hasRemote={hasRemote}
+          hasOpenPr={hasOpenPr}
+          onDefault={onDefault}
+          canSync={canSync}
+          canPublish={canPublish}
+          canCreatePr={canCreatePr}
+          canViewPr={canViewPr}
+          onSync={() => void sync()}
+          onCreatePr={() => void createPr()}
+          onViewPr={() => {
+            if (pr?.url) void openUrl(pr.url);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+
+  return (
+    <aside className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {toolbarTarget
+        ? enabled &&
+          createPortal(
+            <div ref={commitPanelRef} className="relative">
+              <button
+                type="button"
+                aria-label="Commit or push"
+                aria-haspopup="dialog"
+                aria-expanded={commitPanelOpen}
+                onClick={() => setCommitPanelOpen((value) => !value)}
+                className="flex h-7 items-center gap-2 rounded-lg border border-content/15 px-2.5 text-xs text-content/80 hover:bg-content/8"
+              >
+                <Check className="size-3.5" />
+                {busy ? "Working…" : "Commit or push"}
+                <ChevronDown className="size-3" />
+              </button>
+              {commitPanelOpen ? (
+                <div
+                  role="dialog"
+                  aria-label="Commit changes"
+                  className="absolute right-0 top-full z-40 mt-2 w-72 rounded-xl border border-content/15 bg-background-base p-1 shadow-lg"
+                >
+                  {commitControls}
+                </div>
+              ) : null}
+            </div>,
+            toolbarTarget,
+          )
+        : commitControls}
+      {toolbarTarget ? (
+        <div className="shrink-0 p-2">
+          <input
+            aria-label="Filter changed files"
+            placeholder="Filter files…"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            className="h-8 w-full rounded-lg border border-content/15 bg-content/3 px-2.5 text-xs outline-none placeholder:text-content/60 focus-visible:border-accent"
+          />
+        </div>
+      ) : null}
       <div
         ref={lockOverscroll}
         className="min-h-0 flex-1 overflow-y-auto overscroll-none py-1"
       >
-        {files.length === 0 ? (
+        {filter && !files.some(matching) ? (
+          <p className="p-3 text-xs text-content/60">No matching changes</p>
+        ) : files.length === 0 ? (
           <p className="px-3 py-2 text-[12px] text-content/45">
             {index
               ? index.ahead > 0 || index.behind > 0
@@ -466,7 +551,7 @@ function ChangedFiles({
                   onClick: () => void runAll("unstage"),
                 }}
               >
-                {staged.map((file) => (
+                {staged.filter(matching).map((file) => (
                   <ChangeRow
                     key={`staged:${file.relative}`}
                     file={file}
@@ -494,7 +579,7 @@ function ChangedFiles({
                   onClick: () => void runAll("stage"),
                 }}
               >
-                {unstaged.map((file) => (
+                {unstaged.filter(matching).map((file) => (
                   <ChangeRow
                     key={`unstaged:${file.relative}`}
                     file={file}
@@ -928,8 +1013,8 @@ function useDiffIndex(
   index: GitDiffIndex | null;
   reload: () => void;
 } {
-  const [index, setIndex] = useState<GitDiffIndex | null>(
-    () => cachedIndex(cwd),
+  const [index, setIndex] = useState<GitDiffIndex | null>(() =>
+    cachedIndex(cwd),
   );
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((value) => value + 1), []);

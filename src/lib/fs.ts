@@ -33,7 +33,7 @@ export type DiscoveredSkill = {
     | "pi"
     | "omp"
     | "fx"
-    | "monocode";
+    | "avenrail";
 };
 
 export function listSkills(cwd: string): Promise<DiscoveredSkill[]> {
@@ -237,7 +237,7 @@ export function restoreSessionCheckout<
   };
 }
 
-const GIT_CHANGED = "monocode-git-changed";
+const GIT_CHANGED = "avenrail-git-changed";
 
 /** Tell git UIs (diff pane, branch picker) to reload after a local git mutation. */
 export function notifyGitChanged() {

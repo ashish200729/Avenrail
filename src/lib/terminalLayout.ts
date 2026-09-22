@@ -2,10 +2,38 @@ import type { Terminal } from "@xterm/xterm";
 
 export type TerminalFitMode = "shell" | "tui";
 
-const DEFAULT_SCROLLBAR_WIDTH = 14;
+const DEFAULT_SCROLLBAR_WIDTH = 6;
 const MIN_TUI_SCROLLBAR_WIDTH = 1;
 
 type CellSize = { width: number; height: number };
+
+/** Keep scrollbar visibility tied to real history across output and layout changes. */
+export function trackTerminalScrollback(
+  term: Pick<Terminal, "buffer" | "onWriteParsed" | "onResize" | "onScroll">,
+  outer: Pick<HTMLElement, "classList">,
+): () => void {
+  let disposed = false;
+  const sync = () => {
+    if (disposed) return;
+    const buffer = term.buffer.active;
+    outer.classList.toggle(
+      "avenrail-terminal--scrollback",
+      buffer.type === "normal" && buffer.baseY > 0,
+    );
+  };
+  const subscriptions = [
+    term.onWriteParsed(sync),
+    term.onResize(sync),
+    term.onScroll(sync),
+    term.buffer.onBufferChange(sync),
+  ];
+  sync();
+  return () => {
+    disposed = true;
+    subscriptions.forEach((subscription) => subscription.dispose());
+    outer.classList.remove("avenrail-terminal--scrollback");
+  };
+}
 
 export function terminalScrollbarWidth(
   overviewRuler?: { width?: number },
@@ -117,6 +145,8 @@ export function applyTerminalChrome(
   outer: HTMLElement,
   tui: boolean,
 ): void {
-  outer.classList.toggle("monocode-terminal--alt-screen", tui);
-  term.options.overviewRuler = tui ? { width: MIN_TUI_SCROLLBAR_WIDTH } : {};
+  outer.classList.toggle("avenrail-terminal--alt-screen", tui);
+  term.options.overviewRuler = {
+    width: tui ? MIN_TUI_SCROLLBAR_WIDTH : DEFAULT_SCROLLBAR_WIDTH,
+  };
 }

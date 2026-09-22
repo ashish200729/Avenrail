@@ -2,27 +2,32 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { CanvasControls } from "./chrome/CanvasControls";
+import { sidebarOpenItems } from "./lib/sidebarNavigation";
+import { createSessionSelection } from "./lib/sessionSelection";
 import { Sidebar } from "./chrome/Sidebar";
+import { WorkspacePanel } from "./chrome/WorkspacePanel";
+import { sessionOnlyLayout, setSessionSplitRatio, type WorkspaceRequest } from "./lib/workspaceTools";
 import { ApprovalToasts } from "./chrome/ApprovalToasts";
 import { TitleBar, type Tab as TitleTab } from "./chrome/TitleBar";
 import { MenuBar } from "./chrome/MenuBar";
 import { FilePicker } from "./chrome/FilePicker";
-import { UsageFooter } from "./chrome/UsageFooter";
 import { useProjectBranches } from "./hooks/useProjectBranches";
-import { useSidebarLayout } from "./hooks/useSidebarLayout";
 import {
-  LAYOUT_CHANGE_EVENT,
+  loadSidebarLayout,
   loadSidebarOpen,
+  loadWorkspacePanelOpen,
+  saveWorkspacePanelOpen,
   loadProjectRailOpen,
   loadSidebarTabOrder,
   saveSidebarOpen,
   saveProjectRailOpen,
   toggleTranscriptZen,
-  type SidebarLayout,
   type SidebarTabId,
 } from "./lib/appearance";
 import { IS_MAC } from "./lib/platform";
 import { displayAttachments, prepareAttachments } from "./lib/attachments";
+import { errorText } from "./lib/errorText";
 import { basename, notifyGitChanged, pickFolder, restoreSessionCheckout } from "./lib/fs";
 import {
   invalidateProjectFiles,
@@ -170,6 +175,7 @@ import {
 import { removeProjectData } from "./lib/projectData";
 import {
   archiveProject,
+  collectRailProjects,
   forgetProject,
   lastProjectPath,
   loadRecents,
@@ -247,6 +253,7 @@ import {
   turnReport,
   turnUserRequest,
 } from "./lib/secondOpinion";
+import { FilePaneProvider } from "./surfaces/FilePane";
 import { PaneTree } from "./surfaces/PaneTree";
 import { ProjectTerminalDock } from "./surfaces/ProjectTerminalDock";
 import { DiffPane } from "./surfaces/DiffPane";
@@ -459,7 +466,7 @@ export default function App({
   );
   const [sidebarOpen, setSidebarOpen] = useState(loadSidebarOpen);
   const [projectRailOpen, setProjectRailOpen] = useState(loadProjectRailOpen);
-  const sidebarLayout = useSidebarLayout();
+  const [sidebarLayout] = useState(loadSidebarLayout);
   const deckLayout = sidebarLayout === "deck";
   const tabCloseScope = deckLayout ? "project" : "workspace";
   const currentProjectDock = deckLayout
@@ -469,6 +476,31 @@ export default function App({
   const [sidebarTab, setSidebarTab] = useState<SidebarTabId>(
     () => loadSidebarTabOrder()[0] ?? "sessions",
   );
+  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(loadWorkspacePanelOpen);
+  const [workspaceRequest, setWorkspaceRequest] = useState<WorkspaceRequest | null>(null);
+  const [workspaceSelection, setWorkspaceSelection] = useState<string | null>(null);
+  const onWorkspaceSelectionChange = useCallback((id: string | null) => {
+    setWorkspaceSelection(id);
+    if (id !== "terminal") setProjectTerminalFocused(false);
+  }, []);
+  const showWorkspacePanel = useCallback((kind: WorkspaceRequest["kind"], path?: string) => {
+    setWorkspacePanelOpen(true);
+    saveWorkspacePanelOpen(true);
+    setWorkspaceRequest((previous) => ({kind, path, tabId: activeTabId, token: (previous?.token ?? 0) + 1}));
+  }, [activeTabId]);
+  const onToggleWorkspacePanel = useCallback(() => {
+    setProjectTerminalFocused(false);
+    setWorkspacePanelOpen((open) => {
+      saveWorkspacePanelOpen(!open);
+      return !open;
+    });
+  }, []);
+  const onCloseWorkspacePanel = useCallback(() => {
+    setProjectTerminalFocused(false);
+    setWorkspacePanelOpen(false);
+    saveWorkspacePanelOpen(false);
+    requestAnimationFrame(() => document.getElementById("workspace-panel-toggle")?.focus());
+  }, []);
   const classicInbox = !deckLayout && sidebarTab === "inbox";
   const [filesSearchOpen, setFilesSearchOpen] = useState(false);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
@@ -497,6 +529,25 @@ export default function App({
     () => new Map(),
   );
   const [history, setHistory] = useState<SessionSummary[]>([]);
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const historySelection = useRef(createSessionSelection());
+  useEffect(() => {
+    const selection = historySelection.current;
+    return () => selection.invalidate();
+  }, []);
+  const historyRequests = useRef(new Map<string, number>());
+  const historyInFlight = useRef(new Set<string>());
+  const invalidateHistoryRead = useCallback((cwd?: string) => {
+    if (!cwd) return;
+    const key = normalizeProjectPath(cwd);
+    historyRequests.current.set(
+      key,
+      (historyRequests.current.get(key) ?? 0) + 1,
+    );
+    historyInFlight.current.delete(key);
+  }, []);
+
   /**
    * Projects whose rows are already in `history`. This has to be state, not a
    * ref: `sidebarCwd` is derived during render, so the frame that first shows
@@ -507,8 +558,7 @@ export default function App({
   );
   const loadedProjectsRef = useRef(loadedProjects);
   loadedProjectsRef.current = loadedProjects;
-  /** Project whose listing failed, so the error cannot leak to another one. */
-  const [historyErrorCwd, setHistoryErrorCwd] = useState<string | null>(null);
+  const [historyErrors, setHistoryErrors] = useState<ReadonlySet<string>>(() => new Set());
 
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
@@ -700,9 +750,17 @@ export default function App({
     projectCwd;
   const sidebarCwdRef = useRef(sidebarCwd);
   sidebarCwdRef.current = sidebarCwd;
+  const sidebarProjects = useMemo(
+    () => [...collectRailProjects(recents, sidebarCwd).keys()],
+    [recents, sidebarCwd],
+  );
+  const sidebarProjectsKey = JSON.stringify(sidebarProjects);
+  const allowedHistoryProjects = useRef(new Set(sidebarProjects));
+  allowedHistoryProjects.current = new Set(sidebarProjects);
+
   const sidebarCwdKey =
     sidebarCwd && sidebarCwd !== "~" ? normalizeProjectPath(sidebarCwd) : null;
-  const historyFailed = sidebarCwdKey != null && historyErrorCwd === sidebarCwdKey;
+  const historyFailed = sidebarCwdKey != null && historyErrors.has(sidebarCwdKey);
   // True from the very first frame that shows a project we have never listed,
   // so the sidebar can stay blank instead of flashing "No sessions yet".
   const historyPending =
@@ -729,17 +787,6 @@ export default function App({
     busySessionIdsRef.current = nextBusySessionIds;
   }
   const busySessionIds = busySessionIdsRef.current;
-
-  const usageProviders = useMemo(() => {
-    if (active?.harness === "claude" || active?.harness === "codex") {
-      return [active.harness];
-    }
-    return [];
-  }, [active?.harness]);
-  const usageSession = useMemo(() => {
-    if (!active) return undefined;
-    return { harness: active.harness };
-  }, [active?.harness]);
 
   const nextApprovalSessionIds = useMemo(() => {
     const ids = new Set<string>();
@@ -849,33 +896,56 @@ export default function App({
   }, [flushHarnessEvents]);
 
   const refreshHistory = useCallback(async (cwd: string) => {
-    if (!cwd || cwd === "~") return;
-    // `history` holds every visited project's rows and the sidebar filters it
-    // by cwd, so a project loaded once paints from cache on the way back and
-    // revalidates quietly underneath the cards already on screen. Whether the
-    // first load is still pending is derived from `loadedProjects`, not
-    // tracked here — a status set from this effect lands a render too late to
-    // suppress the empty state.
+    if (!looksLikeProject(cwd)) return;
     const key = normalizeProjectPath(cwd);
-    setHistoryErrorCwd((prev) => (prev === key ? null : prev));
+    const request = (historyRequests.current.get(key) ?? 0) + 1;
+    historyRequests.current.set(key, request);
+    historyInFlight.current.add(key);
+    setHistoryErrors((previous) => {
+      if (!previous.has(key)) return previous;
+      const next = new Set(previous);
+      next.delete(key);
+      return next;
+    });
     try {
-      const rows = await listSessionsByProject(cwd);
-      if (cwd !== sidebarCwdRef.current) return;
-      setHistory((current) => replaceProjectHistory(current, cwd, rows));
-      setLoadedProjects((prev) =>
-        prev.has(key) ? prev : new Set(prev).add(key),
+      const rows = await listSessionsByProject(key);
+      if (
+        historyRequests.current.get(key) !== request ||
+        !allowedHistoryProjects.current.has(key)
+      )
+        return;
+      setHistory((current) => replaceProjectHistory(current, key, rows));
+      setLoadedProjects((previous) =>
+        previous.has(key) ? previous : new Set(previous).add(key),
       );
     } catch {
-      if (cwd !== sidebarCwdRef.current) return;
-      // A failed revalidate keeps the cached cards rather than replacing a
-      // good list with an error.
-      if (!loadedProjectsRef.current.has(key)) setHistoryErrorCwd(key);
+      if (
+        historyRequests.current.get(key) !== request ||
+        !allowedHistoryProjects.current.has(key)
+      )
+        return;
+      setHistoryErrors((previous) => new Set(previous).add(key));
+    } finally {
+      if (historyRequests.current.get(key) === request)
+        historyInFlight.current.delete(key);
     }
   }, []);
 
   useEffect(() => {
     void refreshHistory(sidebarCwd);
   }, [sidebarCwd, refreshHistory]);
+  useEffect(() => {
+    if (!deckLayout) return;
+    const projects: string[] = JSON.parse(sidebarProjectsKey);
+    // Read existing session summaries only; this does not start agents or index files.
+    for (const path of projects) {
+      if (
+        !loadedProjectsRef.current.has(path) &&
+        !historyInFlight.current.has(path)
+      )
+        void refreshHistory(path);
+    }
+  }, [deckLayout, sidebarProjectsKey, refreshHistory]);
 
   useEffect(() => {
     prefetchProjectFiles(sidebarCwd);
@@ -884,15 +954,11 @@ export default function App({
   const persistSession = useCallback((session: Session | undefined) => {
     if (!session || !shouldPersistSession(session)) return;
     const fingerprint = persistFingerprint(session);
-    void upsertSession(session)
+    return upsertSession(session)
       .then((summary) => {
         if (!summary) return;
         lastPersisted.current.set(session.id, fingerprint);
-        if (summary.cwd === sidebarCwdRef.current) {
-          setHistory((current) =>
-            mergeProjectHistorySummary(current, summary),
-          );
-        }
+        setHistory((current) => mergeProjectHistorySummary(current, summary));
       })
       .catch(() => undefined);
   }, []);
@@ -948,11 +1014,7 @@ export default function App({
           const summary = await upsertSession(session).catch(() => null);
           if (!summary) return;
           lastPersisted.current.set(session.id, fingerprint);
-          if (summary.cwd === sidebarCwdRef.current) {
-            setHistory((current) =>
-              mergeProjectHistorySummary(current, summary),
-            );
-          }
+          setHistory((current) => mergeProjectHistorySummary(current, summary));
         }),
       );
     }, 650);
@@ -1048,6 +1110,7 @@ export default function App({
   }, [sessions, tabs, persistSession]);
 
   const activateTab = useCallback((id: string) => {
+    historySelection.current.invalidate();
     setActiveTabId(id);
     const tab = tabsRef.current.find((entry) => entry.id === id);
     if (deckLayout && tab) {
@@ -1105,6 +1168,7 @@ export default function App({
   );
 
   const onNew = useCallback(() => {
+    historySelection.current.invalidate();
     setSearchViewOpen(false);
     setInboxViewOpen(false);
     setNotesViewOpen(false);
@@ -1126,6 +1190,7 @@ export default function App({
   const onStartInboxItem = useCallback(
     async (item: InboxItem, body?: string) => {
       const start = (description?: string) => {
+        historySelection.current.invalidate();
         setInboxViewOpen(false);
         setNotesViewOpen(false);
         setSidebarTab("sessions");
@@ -1290,16 +1355,17 @@ export default function App({
             : undefined,
         );
         if (!existing) {
-          return [...prev, createProjectTerminal(projectPath, file)];
+          return [...prev, createProjectTerminal(projectPath, file, "right")];
         }
         return mapProjectTerminal(prev, projectPath, (dock) =>
           addTerminalToDock(dock, file),
         );
       });
       focusProjectTerminal();
+      showWorkspacePanel("terminal");
       return true;
     },
-    [focusProjectTerminal],
+    [focusProjectTerminal, showWorkspacePanel],
   );
 
   const onOpenTerminal = useCallback(
@@ -1374,6 +1440,7 @@ export default function App({
         );
       }
       focusProjectTerminal();
+      showWorkspacePanel("terminal");
       return;
     }
     onOpenTerminal(active?.cwd ?? projectCwd);
@@ -1383,6 +1450,7 @@ export default function App({
     focusProjectTerminal,
     onOpenTerminal,
     projectCwd,
+    showWorkspacePanel,
   ]);
 
   const onNewTerminalInSession = useCallback(
@@ -1415,7 +1483,7 @@ export default function App({
         withDockOpen(entry, nextOpen),
       ),
     );
-    if (nextOpen) focusProjectTerminal();
+    if (nextOpen) { focusProjectTerminal(); showWorkspacePanel("terminal"); }
     else setProjectTerminalFocused(false);
   }, [
     active?.cwd,
@@ -1423,16 +1491,8 @@ export default function App({
     focusProjectTerminal,
     openProjectTerminal,
     projectCwd,
+    showWorkspacePanel,
   ]);
-
-  const onHideProjectTerminal = useCallback(() => {
-    setProjectTerminals((prev) =>
-      mapProjectTerminal(prev, projectCwdRef.current, (dock) =>
-        withDockOpen(dock, false),
-      ),
-    );
-    setProjectTerminalFocused(false);
-  }, []);
 
   const onProjectTerminalSide = useCallback((side: DockSide) => {
     setProjectTerminals((prev) =>
@@ -1508,6 +1568,7 @@ export default function App({
 
   const onCloseTab = useCallback(
     (id: string, opts?: { confirmedTerminalIds?: string[] }) => {
+      historySelection.current.invalidate();
       const current = tabsRef.current;
       const index = current.findIndex((t) => t.id === id);
       if (index < 0) return;
@@ -1877,6 +1938,7 @@ export default function App({
 
   const onClosePane = useCallback(
     (sessionId?: string) => {
+      historySelection.current.invalidate();
       if (
         sessionId === undefined &&
         deckLayout &&
@@ -2029,6 +2091,7 @@ export default function App({
 
   const onFocusPane = useCallback(
     (paneId: string) => {
+      historySelection.current.invalidate();
       setProjectTerminalFocused(false);
       setTabs((prev) =>
         prev.map((t) =>
@@ -2068,15 +2131,11 @@ export default function App({
             };
           }),
         );
-        if (deckLayout) {
-          setSidebarOpen(true);
-          saveSidebarOpen(true);
-          setSidebarTab("changes");
-        }
+        if (deckLayout) showWorkspacePanel("changes");
         setComposerFocused(false);
       })();
     },
-    [activeTabId, deckLayout],
+    [activeTabId, deckLayout, showWorkspacePanel],
   );
 
   const onToggleDiff = useCallback(() => {
@@ -2104,10 +2163,8 @@ export default function App({
   }, [activeTabId]);
 
   const onShowSourceControl = useCallback(() => {
-    setSidebarOpen(true);
-    saveSidebarOpen(true);
-    setSidebarTab("changes");
-  }, []);
+    showWorkspacePanel("changes");
+  }, [showWorkspacePanel]);
 
   const onToggleChanges = useCallback(() => {
     if (deckLayout) onShowSourceControl();
@@ -2207,6 +2264,7 @@ export default function App({
   );
 
   const focusOpenSession = useCallback((sessionId: string) => {
+    historySelection.current.invalidate();
     const tab = tabsRef.current.find((entry) =>
       leafIds(entry.layout).includes(sessionId),
     );
@@ -2265,11 +2323,29 @@ export default function App({
 
   const onSelectHistorySession = useCallback(
     async (sessionId: string) => {
-      if (focusOpenSession(sessionId)) return;
+      historySelection.current.invalidate();
+      setSearchViewOpen(false);
+      setInboxViewOpen(false);
+      setNotesViewOpen(false);
+      setSettingsOpen(false);
+      setProjectTerminalFocused(false);
+      const selectProjectContext = (cwd?: string) => {
+        if (!deckLayout || !cwd || !looksLikeProject(cwd)) return;
+        setProjectCwd(normalizeProjectPath(cwd));
+        setRecents(rememberProject(cwd));
+      };
+      const targetCwd =
+        sessionsRef.current.find((session) => session.id === sessionId)?.cwd ??
+        historyRef.current.find((row) => row.id === sessionId)?.cwd;
+      if (focusOpenSession(sessionId)) {
+        selectProjectContext(targetCwd);
+        return;
+      }
       const open = sessionsRef.current.find(
         (session) => session.id === sessionId,
       );
       if (open) {
+        selectProjectContext(open.cwd);
         if (replaceBlankPaneWithSession(open)) return;
         const tab = newTab(open.id);
         appendTab(tab, open.cwd);
@@ -2278,31 +2354,39 @@ export default function App({
         return;
       }
 
-      const loaded = await getSession(sessionId).catch(() => null);
-      if (!loaded) {
-        void refreshHistory(sidebarCwd);
-        return;
-      }
-      const restored = await restoreSessionCheckout(loaded);
-      if (restored.providerSessionId && isLiveHarness(restored.harness)) {
-        bindHarnessSession(
-          restored.harness,
-          restored.id,
-          restored.providerSessionId,
-          sessionWorkCwd(restored),
+      await historySelection.current.load(sessionId, (loaded) => {
+        if (!loaded) {
+          void refreshHistory(targetCwd ?? sidebarCwd);
+          return;
+        }
+        // The session may have become live while its saved snapshot was loading.
+        const current = sessionsRef.current.find((session) => session.id === sessionId);
+        if (focusOpenSession(sessionId)) {
+          selectProjectContext(current?.cwd ?? loaded.cwd);
+          return;
+        }
+        const restored = current ?? restoreSessionCheckout(loaded);
+        selectProjectContext(restored.cwd);
+        if (!current && restored.providerSessionId && isLiveHarness(restored.harness)) {
+          bindHarnessSession(
+            restored.harness,
+            restored.id,
+            restored.providerSessionId,
+            sessionWorkCwd(restored),
+          );
+        }
+        if (!current) lastPersisted.current.set(restored.id, persistFingerprint(restored));
+        if (replaceBlankPaneWithSession(restored)) return;
+        const tab = newTab(restored.id);
+        setSessions((prev) =>
+          prev.some((session) => session.id === restored.id)
+            ? prev
+            : [...prev, restored],
         );
-      }
-      lastPersisted.current.set(restored.id, persistFingerprint(restored));
-      if (replaceBlankPaneWithSession(restored)) return;
-      const tab = newTab(restored.id);
-      setSessions((prev) =>
-        prev.some((session) => session.id === restored.id)
-          ? prev
-          : [...prev, restored],
-      );
-      appendTab(tab, restored.cwd);
-      setActiveTabId(tab.id);
-      setComposerFocused(true);
+        appendTab(tab, restored.cwd);
+        setActiveTabId(tab.id);
+        setComposerFocused(true);
+      });
     },
     [
       appendTab,
@@ -2310,6 +2394,7 @@ export default function App({
       refreshHistory,
       replaceBlankPaneWithSession,
       sidebarCwd,
+      deckLayout,
     ],
   );
 
@@ -2317,6 +2402,11 @@ export default function App({
     async (sessionId: string, displayTitle: string) => {
       const trimmed = displayTitle.trim();
       if (!trimmed) return;
+      const targetCwd =
+        sessionsRef.current.find((session) => session.id === sessionId)?.cwd ??
+        historyRef.current.find((row) => row.id === sessionId)?.cwd ??
+        sidebarCwd;
+      invalidateHistoryRead(targetCwd);
 
       const open = sessionsRef.current.find(
         (session) => session.id === sessionId,
@@ -2324,26 +2414,37 @@ export default function App({
       if (open) {
         const title = formatSessionTitle(open.harness, trimmed);
         const updated = { ...open, title };
+        try {
+          await upsertSession(updated);
+        } catch (error) {
+          window.alert(`Could not rename session: ${errorText(error, "Please try again.")}`);
+          return;
+        }
+        lastPersisted.current.set(sessionId, persistFingerprint(updated));
         setSessions((prev) =>
-          prev.map((session) => (session.id === sessionId ? updated : session)),
+          prev.map((session) => (session.id === sessionId ? { ...session, title } : session)),
         );
-        persistSession(updated);
       } else {
         const restored = await getSession(sessionId).catch(() => null);
         if (!restored) {
-          void refreshHistory(sidebarCwd);
+          void refreshHistory(targetCwd);
           return;
         }
         const updated = {
           ...restored,
           title: formatSessionTitle(restored.harness, trimmed),
         };
-        await upsertSession(updated).catch(() => undefined);
+        try {
+          await upsertSession(updated);
+        } catch (error) {
+          window.alert(`Could not rename session: ${errorText(error, "Please try again.")}`);
+          return;
+        }
         lastPersisted.current.set(sessionId, persistFingerprint(updated));
       }
-      void refreshHistory(sidebarCwd);
+      void refreshHistory(targetCwd);
     },
-    [persistSession, refreshHistory, sidebarCwd],
+    [invalidateHistoryRead, refreshHistory, sidebarCwd],
   );
 
   const onArchiveHistorySession = useCallback(
@@ -2351,10 +2452,19 @@ export default function App({
       const open = sessionsRef.current.find(
         (session) => session.id === sessionId,
       );
-      if (open && shouldPersistSession(open)) {
-        await upsertSession(open).catch(() => undefined);
+      invalidateHistoryRead(
+        open?.cwd ??
+          historyRef.current.find((row) => row.id === sessionId)?.cwd,
+      );
+      try {
+        if (open && shouldPersistSession(open)) {
+          await upsertSession(open);
+        }
+        await setSessionArchived(sessionId, archived);
+      } catch (error) {
+        window.alert(`Could not ${archived ? "archive" : "restore"} session: ${errorText(error, "Please try again.")}`);
+        return;
       }
-      await setSessionArchived(sessionId, archived).catch(() => undefined);
       setHistory((current) => {
         const existing = current.find((entry) => entry.id === sessionId);
         if (existing) {
@@ -2369,7 +2479,7 @@ export default function App({
         });
       });
     },
-    [],
+    [invalidateHistoryRead],
   );
 
   const onDeleteHistorySession = useCallback(
@@ -2384,27 +2494,40 @@ export default function App({
         : "this session";
 
       if (!window.confirm(`Delete “${label}”?`)) return;
+      const targetCwd = summary?.cwd ?? sidebarCwd;
+      invalidateHistoryRead(targetCwd);
+      historySelection.current.invalidate();
 
-      if (open?.busy) {
+      // Do not tear down a live session or remove its tab until storage succeeds.
+      try {
+        await deleteSession(sessionId);
+      } catch (error) {
+        window.alert(`Could not delete session: ${errorText(error, "Please try again.")}`);
+        return;
+      }
+      historySelection.current.invalidate();
+
+      const current = sessionsRef.current.find((session) => session.id === sessionId);
+      if (current?.busy) {
         turnGen.current.set(
           sessionId,
           (turnGen.current.get(sessionId) ?? 0) + 1,
         );
-        for (const id of sessionChildHarnesses(open)) {
+        for (const id of sessionChildHarnesses(current)) {
           void cancelHarnessTurn(id, sessionId);
         }
       }
 
       const harness = open?.harness ?? summary?.harness ?? "cursor";
-      if (open) {
-        for (const id of sessionChildHarnesses(open)) {
+      if (current) {
+        for (const id of sessionChildHarnesses(current)) {
           void forgetHarnessSession(id, sessionId);
         }
       } else {
         void forgetHarnessSession(harness, sessionId);
       }
       lastPersisted.current.delete(sessionId);
-      await deleteSession(sessionId).catch(() => undefined);
+      pendingPersist.current.delete(sessionId);
 
       const affectedTabs = tabsRef.current.filter((tab) =>
         leafIds(tab.layout).includes(sessionId),
@@ -2414,7 +2537,7 @@ export default function App({
         setSessions((prev) =>
           prev.filter((session) => session.id !== sessionId),
         );
-        void refreshHistory(sidebarCwd);
+        void refreshHistory(targetCwd);
         return;
       }
 
@@ -2476,9 +2599,9 @@ export default function App({
           return !!tab && session.id === tab.focusedId;
         }),
       );
-      void refreshHistory(sidebarCwd);
+      void refreshHistory(targetCwd);
     },
-    [history, refreshHistory, sidebarCwd],
+    [history, invalidateHistoryRead, refreshHistory, sidebarCwd],
   );
 
   const onFocusDir = useCallback(
@@ -2495,16 +2618,17 @@ export default function App({
       setTabs((prev) =>
         prev.map((t) =>
           t.id === tabId
-            ? { ...t, layout: setSplitRatio(t.layout, splitId, index, ratio) }
+            ? { ...t, layout: deckLayout ? setSessionSplitRatio(t, splitId, index, ratio) : setSplitRatio(t.layout, splitId, index, ratio) }
             : t,
         ),
       );
     },
-    [],
+    [deckLayout],
   );
 
   const onCwdChange = useCallback(
     (sessionId: string, cwd: string) => {
+      historySelection.current.invalidate();
       const normalized = normalizeProjectPath(cwd);
       const current = sessionsRef.current.find((s) => s.id === sessionId);
       const previous = current?.cwd;
@@ -2593,6 +2717,7 @@ export default function App({
 
   const onSelectProject = useCallback(
     (path: string) => {
+      historySelection.current.invalidate();
       setSearchViewOpen(false);
       setInboxViewOpen(false);
       setNotesViewOpen(false);
@@ -2656,6 +2781,20 @@ export default function App({
   const onRemoveProject = useCallback(
     (path: string, options: { purgeData: boolean }) => {
       const normalized = normalizeProjectPath(path);
+      invalidateHistoryRead(normalized);
+      setHistory((current) =>
+        current.filter((row) => !sameProjectPath(row.cwd, normalized)),
+      );
+      setLoadedProjects((current) => {
+        const next = new Set(current);
+        next.delete(normalized);
+        return next;
+      });
+      setHistoryErrors((current) => {
+        const next = new Set(current);
+        next.delete(normalized);
+        return next;
+      });
       const wasCurrent = sameProjectPath(projectCwdRef.current, normalized);
       const remaining = options.purgeData
         ? forgetProject(normalized)
@@ -2755,7 +2894,7 @@ export default function App({
         }
       }
     },
-    [activeTabId, onSelectProject, persistSession],
+    [activeTabId, invalidateHistoryRead, onSelectProject, persistSession],
   );
 
   const onRestoreProject = useCallback(
@@ -2813,6 +2952,7 @@ export default function App({
 
   const onOpenFile = useCallback<OpenFileFn>(
     (path, navigation) => {
+      historySelection.current.invalidate();
       void (async () => {
         const resolved =
           (await resolveOpenablePath(gitCwdRef.current, path)) ?? path;
@@ -2833,10 +2973,11 @@ export default function App({
             token: editorNavigationToken.current,
           });
         }
+        if (deckLayout) showWorkspacePanel("file", resolved);
         setComposerFocused(false);
       })();
     },
-    [activeTabId],
+    [activeTabId, deckLayout, showWorkspacePanel],
   );
 
   const onOpenPlan = useCallback(
@@ -2858,9 +2999,10 @@ export default function App({
           entry.id === tab.id ? openEditorTab(entry, file) : entry,
         ),
       );
+      if (deckLayout) showWorkspacePanel("file", file.path);
       setComposerFocused(false);
     },
-    [activeTabId],
+    [activeTabId, deckLayout, showWorkspacePanel],
   );
 
   const onFileDirtyChange = useCallback((fileId: string, dirty: boolean) => {
@@ -2888,6 +3030,8 @@ export default function App({
   );
 
   const onSelectFileSurface = useCallback((paneId: string, fileId: string) => {
+    historySelection.current.invalidate();
+    setProjectTerminalFocused(false);
     setTabs((prev) =>
       prev.map((tab) => {
         const found = findSurfacePane(tab, paneId);
@@ -3033,10 +3177,10 @@ export default function App({
               attachments: prepared,
             });
           } catch (error: unknown) {
-            const message =
-              error instanceof Error
-                ? error.message
-                : `${current.harness} could not steer the active turn`;
+            const message = errorText(
+              error,
+              `${current.harness} could not steer the active turn`,
+            );
             enqueueHarnessEvent(sessionId, {
               type: "session.error",
               message,
@@ -3238,10 +3382,10 @@ export default function App({
         } catch (error: unknown) {
           if (turnGen.current.get(sessionId) !== gen) return;
           if (wrap) revealHandoff(wrap.text);
-          const message =
-            error instanceof Error
-              ? error.message
-              : `${current.harness} adapter failed`;
+          const message = errorText(
+            error,
+            `${current.harness} adapter failed`,
+          );
           enqueueHarnessEvent(sessionId, {
             type: "session.error",
             message,
@@ -3408,9 +3552,10 @@ export default function App({
     [focusOpenSession, onSelectHistorySession],
   );
 
-  const nextTitleTabs: TitleTab[] = deckProjectTabs.map((tab) =>
-    toTitleTab(tab, sessions, dirtyFiles),
-  );
+  const nextTitleTabs: TitleTab[] = deckProjectTabs.map((tab) => {
+    const title = toTitleTab(tab, sessions, dirtyFiles);
+    return deckLayout && sessionOnlyLayout(tab) ? {...title, files: [], fileFocused: false, multiPane: title.sessionCount > 1} : title;
+  });
   tabProjectsRef.current = new Map(
     nextTitleTabs.map((tab) => [tab.id, tab.project]),
   );
@@ -3439,6 +3584,31 @@ export default function App({
           : {}),
       }),
     [history, projectBranches, sessions, sidebarCwd],
+  );
+
+  const allSidebarHistory = useMemo(
+    () =>
+      sidebarProjects.flatMap((path) =>
+        historyWithLiveSessions(
+          history,
+          sessions,
+          path,
+          path === sidebarCwd
+            ? {
+                branch: projectBranches?.current ?? undefined,
+                repo: projectName(path),
+              }
+            : undefined,
+        ),
+      ),
+    [sidebarProjects, history, sessions, sidebarCwd, projectBranches],
+  );
+  const allSidebarOpenItems = useMemo(
+    () =>
+      [...new Set([...sidebarProjects, sidebarCwd])].flatMap((path) =>
+        sidebarOpenItems(tabs, sessions, allSidebarHistory, path),
+      ),
+    [sidebarProjects, sidebarCwd, tabs, sessions, allSidebarHistory],
   );
 
   const onToggleSidebar = useCallback(() => {
@@ -3473,17 +3643,22 @@ export default function App({
   }, []);
 
   const onFindInProject = useCallback(() => {
+    setSettingsOpen(false);
     setSearchViewOpen(false);
     setInboxViewOpen(false);
     setNotesViewOpen(false);
-    setSidebarOpen(true);
-    saveSidebarOpen(true);
-    setSidebarTab("files");
+    if (deckLayout) showWorkspacePanel("files");
+    else {
+      setSidebarOpen(true);
+      saveSidebarOpen(true);
+      setSidebarTab("files");
+    }
     setFilesSearchOpen(true);
     setSearchFocusToken((token) => token + 1);
-  }, []);
+  }, [deckLayout, showWorkspacePanel]);
 
   const onOpenSearch = useCallback(() => {
+    historySelection.current.invalidate();
     setFilePickerOpen(false);
     setSettingsOpen(false);
     setInboxViewOpen(false);
@@ -3497,6 +3672,7 @@ export default function App({
   }, []);
 
   const onOpenInbox = useCallback(() => {
+    historySelection.current.invalidate();
     setFilePickerOpen(false);
     setSettingsOpen(false);
     setSearchViewOpen(false);
@@ -3516,6 +3692,7 @@ export default function App({
   }, []);
 
   const onOpenNotes = useCallback(() => {
+    historySelection.current.invalidate();
     if (!loadNotesEnabled()) return;
     setFilePickerOpen(false);
     setSettingsOpen(false);
@@ -3529,6 +3706,7 @@ export default function App({
   }, []);
 
   const openSettings = useCallback((section?: SettingsSectionId) => {
+    historySelection.current.invalidate();
     setFilePickerOpen(false);
     setSearchViewOpen(false);
     setInboxViewOpen(false);
@@ -3587,33 +3765,6 @@ export default function App({
     onVisitForward();
   }, [onVisitForward]);
 
-  useEffect(() => {
-    const onLayoutChange = (event: Event) => {
-      const layout = (event as CustomEvent<SidebarLayout>).detail;
-      setTabs((prev) =>
-        prev.map((tab) => ({ ...tab, diffOpen: false, diffFocused: false })),
-      );
-      if (layout === "classic") {
-        setSidebarTab((tab) =>
-          inboxViewOpenRef.current
-            ? "inbox"
-            : tab === "changes"
-              ? "sessions"
-              : tab,
-        );
-        if (inboxViewOpenRef.current) {
-          setInboxViewOpen(false);
-          setSidebarOpen(true);
-          saveSidebarOpen(true);
-        }
-        setProjectTerminalFocused(false);
-      } else {
-        setSidebarTab((tab) => (tab === "inbox" ? "sessions" : tab));
-      }
-    };
-    window.addEventListener(LAYOUT_CHANGE_EVENT, onLayoutChange);
-    return () => window.removeEventListener(LAYOUT_CHANGE_EVENT, onLayoutChange);
-  }, []);
 
   useEffect(() => {
     if (!deckLayout && sidebarTab === "changes") {
@@ -3709,7 +3860,7 @@ export default function App({
       if (cmd) {
         const target = e.target instanceof Element ? e.target : null;
         if (
-          target?.closest(".monocode-terminal") &&
+          target?.closest(".avenrail-terminal") &&
           e.ctrlKey &&
           !e.metaKey &&
           (cmd === "back" ||
@@ -3727,7 +3878,7 @@ export default function App({
         const inPicker =
           target &&
           target.closest(
-            "[data-model-picker], [data-file-picker], [data-branch-picker], [data-skill-picker], [data-mention-picker], [data-app-search]",
+            "[data-composer-options], [data-model-picker], [data-file-picker], [data-branch-picker], [data-skill-picker], [data-mention-picker], [data-app-search]",
           );
         if (inPicker && typeof cmd === "object" && "activate" in cmd) {
           return;
@@ -3783,7 +3934,7 @@ export default function App({
       }
       if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") {
         const target = e.target instanceof Element ? e.target : null;
-        if (target?.closest(".monocode-terminal") && e.ctrlKey && !e.metaKey) {
+        if (target?.closest(".avenrail-terminal") && e.ctrlKey && !e.metaKey) {
           return;
         }
         e.preventDefault();
@@ -3900,6 +4051,7 @@ export default function App({
   }, [currentProjectDock, dockVisible]);
 
   return (
+    <FilePaneProvider>
     <div
       className={`flex h-full text-content ${
         IS_MAC ? "bg-background-base/40" : "bg-background-base"
@@ -3917,6 +4069,26 @@ export default function App({
         onOpenFilesSearch={onFindInProject}
         searchFocusToken={searchFocusToken}
         sessions={sidebarHistory}
+        allSessions={allSidebarHistory}
+        allOpenItems={allSidebarOpenItems}
+        loadedProjects={loadedProjects}
+        errorProjects={historyErrors}
+        onRefreshProject={refreshHistory}
+        openItems={deckLayout ? sidebarOpenItems(deckProjectTabs, sessions, sidebarHistory, sidebarCwd) : []}
+        activeTabId={activeTabId}
+        openSessionTabs={new Map(tabs.filter((tab) => planWorkspaceTabClose({
+          tabs, sessions, closingTabId: tab.id, scope: tabCloseScope,
+        }).action !== "keep").flatMap((tab) => leafIds(tab.layout).map((id) => [id, tab.id] as const)))}
+        onSelectOpenItem={(item) => {
+          setSearchViewOpen(false); setSettingsOpen(false); setInboxViewOpen(false); setNotesViewOpen(false);
+          if (item.sessionId) void onSelectHistorySession(item.sessionId);
+          else {
+            activateTab(item.tabId);
+            setWorkspacePanelOpen(true);
+            saveWorkspacePanelOpen(true);
+          }
+        }}
+        onCloseOpenTab={deckLayout && tabs.length > 1 ? onCloseTab : undefined}
         busySessionIds={busySessionIds}
         approvalSessionIds={approvalSessionIds}
         activeSessionId={active?.id}
@@ -3934,12 +4106,7 @@ export default function App({
         canGoForward={tabVisitNav.canForward}
         onGoBack={onRailBack}
         onGoForward={onRailForward}
-        onOpenDiff={onOpenDiff}
         onShowSourceControl={onToggleChanges}
-        selectedDiffPath={
-          activeTab ? selectedChangePath(activeTab, gitCwd) : undefined
-        }
-        textHarness={pickTextHarness(active?.harness)}
         recents={recents}
         busyProjectPaths={sessions.flatMap((session) =>
           session.busy && session.cwd ? [session.cwd] : [],
@@ -3951,7 +4118,6 @@ export default function App({
         onSearch={onOpenSearch}
         onOpenInbox={onOpenInbox}
         onOpenNotes={notesEnabled ? onOpenNotes : undefined}
-        onGoToFile={deckLayout ? onGoToFile : undefined}
         searchActive={searchViewOpen}
         inboxActive={inboxViewOpen}
         notesActive={notesViewOpen}
@@ -3994,17 +4160,23 @@ export default function App({
             onOpenNotes={notesEnabled ? onOpenNotes : undefined}
           />
         ) : null}
+        <div className="workspace-stage relative flex min-h-0 min-w-0 flex-1">
+        <div className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col">
         <TitleBar
+          hidden={deckLayout}
           tabs={titleTabs}
           activeId={activeTabId}
           cwd={sidebarCwd}
           gitCwd={gitCwd}
-          sidebarOpen={deckLayout || sidebarOpen}
+          sidebarOpen={deckLayout ? projectRailOpen : sidebarOpen}
           deckLayout={deckLayout}
           projectRailOpen={projectRailOpen}
+          workspacePanelOpen={workspacePanelOpen}
+          hideWindowControls={deckLayout && workspacePanelOpen}
+          onToggleWorkspacePanel={onToggleWorkspacePanel}
           sourceControlActive={
             deckLayout
-              ? sidebarOpen && sidebarTab === "changes"
+              ? workspacePanelOpen && workspaceSelection === "changes"
               : !!activeTab?.diffOpen
           }
           onToggleSidebar={onToggleSidebar}
@@ -4039,49 +4211,14 @@ export default function App({
           onSelectProject={deckLayout ? onSelectProject : undefined}
         />
 
+        {deckLayout ? <CanvasControls sidebarOpen={projectRailOpen} workspaceOpen={workspacePanelOpen} onShowSidebar={onToggleSidebar} onNewSession={onNew} onToggleWorkspace={onToggleWorkspacePanel} /> : null}
         <main className="relative min-h-0 min-w-0 flex-1">
           <div
-            ref={dockGridRef}
-            className="absolute inset-0 grid h-full min-h-0 min-w-0"
+            className="absolute inset-0 flex h-full min-h-0 min-w-0"
           >
-            {projectTerminals.map((dock) => {
-              const show =
-                deckLayout &&
-                dock.open &&
-                sameProjectPath(dock.projectPath, projectCwd);
-              return (
-                <div
-                  key={dock.projectPath}
-                  className={
-                    show
-                      ? "h-full min-h-0 min-w-0 w-full overflow-hidden"
-                      : "hidden"
-                  }
-                  style={show ? { gridArea: "dock" } : undefined}
-                  aria-hidden={!show}
-                >
-                  <ProjectTerminalDock
-                    dock={dock}
-                    focused={show && projectTerminalFocused}
-                    onFocus={focusProjectTerminal}
-                    onHide={onHideProjectTerminal}
-                    onSideChange={onProjectTerminalSide}
-                    onSizePaint={paintDockSize}
-                    onSizeCommit={commitDockSize}
-                    onAddTerminal={() =>
-                      onOpenTerminal(active?.cwd ?? projectCwd)
-                    }
-                    onSelectTerminal={onSelectProjectTerminal}
-                    onCloseTerminal={onCloseProjectTerminal}
-                    onReorderTerminals={onReorderProjectTerminals}
-                    onTerminalMetaChange={onTerminalMetaChange}
-                  />
-                </div>
-              );
-            })}
             <div
               className="relative flex min-h-0 min-w-0 flex-row"
-              style={{ gridArea: "main" }}
+              style={{flex: 1}}
             >
               {classicInbox ? (
                 <InboxDetailPane
@@ -4091,7 +4228,9 @@ export default function App({
                 />
               ) : (
                 <div className="relative min-h-0 min-w-0 flex-1">
-              {tabs.map((tab) => (
+              {tabs.map((tab) => {
+                const chatLayout = deckLayout ? sessionOnlyLayout(tab) : tab.layout;
+                return (
                 <div
                   key={tab.id}
                   aria-hidden={tab.id !== activeTabId}
@@ -4102,9 +4241,9 @@ export default function App({
                   }
                 >
                   <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-                    <PaneTree
+                    {chatLayout ? <PaneTree
                       visible={tab.id === activeTabId}
-                      layout={tab.layout}
+                      layout={chatLayout}
                       sessions={sessions}
                       editorPanes={[
                         ...tab.editorPanes,
@@ -4152,10 +4291,10 @@ export default function App({
                       onMovePane={onMovePane}
                       onNewTerminal={onNewTerminalInSession}
                       onTerminalMetaChange={onTerminalMetaChange}
-                    />
+                    /> : <div className="m-auto text-sm text-content/60">Select a session from the sidebar</div>}
                   </div>
                 </div>
-              ))}
+              ); })}
                 </div>
               )}
             {!deckLayout && !classicInbox && activeTab?.diffOpen ? (
@@ -4172,6 +4311,77 @@ export default function App({
             </div>
           </div>
         </main>
+        </div>
+          <WorkspacePanel
+            sidebarOpen={projectRailOpen}
+            onShowSidebar={onToggleSidebar}
+            onNewSession={onNew}
+            open={deckLayout && workspacePanelOpen}
+            active={deckLayout && workspacePanelOpen && !searchViewOpen && !settingsOpen && !inboxViewOpen && !notesViewOpen}
+            cwd={gitCwd || sidebarCwd}
+            activeTabId={activeTabId}
+            tabs={tabs}
+            request={workspaceRequest}
+            onSelectionChange={onWorkspaceSelectionChange}
+            renderEditors={deckLayout}
+            editorProps={{
+              dirtyFileIds: dirtyFiles, fileErrorCounts, sessions,
+              onFocus: onFocusPane, onSelectFile: onSelectFileSurface, onCloseFile,
+              onDirtyChange: onFileDirtyChange, onErrorCountChange: onFileErrorCountChange,
+              onReorderFiles, onOpenFile, editorNavigation, onTerminalMetaChange,
+            }}
+            terminalAvailable={!!currentProjectDock?.open}
+            terminalContent={(visible) => (<>
+            {projectTerminals.map((dock) => {
+              const show =
+                visible &&
+                dock.open &&
+                sameProjectPath(dock.projectPath, projectCwd);
+              return (
+                <div
+                  key={dock.projectPath}
+                  className={
+                    show
+                      ? "h-full min-h-0 min-w-0 w-full overflow-hidden"
+                      : "hidden"
+                  }
+                  aria-hidden={!show}
+                >
+                  <ProjectTerminalDock
+                    embedded
+                    dock={dock}
+                    focused={show && projectTerminalFocused}
+                    onFocus={focusProjectTerminal}
+                    onSideChange={onProjectTerminalSide}
+                    onSizePaint={paintDockSize}
+                    onSizeCommit={commitDockSize}
+                    onAddTerminal={() =>
+                      onOpenTerminal(active?.cwd ?? projectCwd)
+                    }
+                    onSelectTerminal={onSelectProjectTerminal}
+                    onCloseTerminal={onCloseProjectTerminal}
+                    onReorderTerminals={onReorderProjectTerminals}
+                    onTerminalMetaChange={onTerminalMetaChange}
+                  />
+                </div>
+              );
+            })}
+            </>)}
+            onClose={onCloseWorkspacePanel}
+            onOpenFile={onOpenFile}
+            onOpenDiff={onOpenDiff}
+            onOpenTerminal={onOpenTerminal}
+            onShowTerminal={onShowProjectTerminal}
+            onFileMoved={onFileMoved}
+            onFileDeleted={onFileDeleted}
+            onFindInProject={onFindInProject}
+            selectedDiffPath={activeTab ? selectedChangePath(activeTab, gitCwd) : undefined}
+            textHarness={pickTextHarness(active?.harness)}
+            filesSearchOpen={filesSearchOpen}
+            onFilesSearchOpenChange={setFilesSearchOpen}
+            searchFocusToken={searchFocusToken}
+          />
+        </div>
         </div>
         {searchViewOpen ? (
           <SearchView
@@ -4220,9 +4430,6 @@ export default function App({
             }
           />
         ) : null}
-        {searchViewOpen || inboxViewOpen || notesViewOpen || settingsOpen ? null : (
-          <UsageFooter providers={usageProviders} session={usageSession} />
-        )}
       </div>
 
       {filePickerOpen ? (
@@ -4241,6 +4448,7 @@ export default function App({
         onApproval={onApproval}
       />
     </div>
+    </FilePaneProvider>
   );
 }
 

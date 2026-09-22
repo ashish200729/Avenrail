@@ -52,7 +52,7 @@ export async function runUpdateFlow(
       const current: UpdaterSnapshot = { phase: "current", currentVersion };
       onProgress?.(current);
       if (manual) {
-        await message("You're on the latest version.", { title: "MonoCode" });
+        await message("You're on the latest version.", { title: "Avenrail" });
       }
       return current;
     }
@@ -71,7 +71,7 @@ export async function runUpdateFlow(
     const notes = update.body?.trim();
     const detail = notes ? `\n\n${notes}` : "";
     const yes = await ask(
-      `MonoCode ${update.version} is available (you have ${currentVersion}).${detail}\n\nInstall now?`,
+      `Avenrail ${update.version} is available (you have ${currentVersion}).${detail}\n\nInstall now?`,
       { title: "Update available", kind: "info" },
     );
     if (!yes) return available;
@@ -83,7 +83,7 @@ export async function runUpdateFlow(
     onProgress?.(failed);
     if (manual) {
       await message(`Couldn't check for updates.\n\n${error}`, {
-        title: "MonoCode",
+        title: "Avenrail",
       });
     }
     return failed;
@@ -149,7 +149,7 @@ export async function installPendingUpdate(
       error,
     };
     onProgress?.(failed);
-    await message(`Couldn't install the update.\n\n${error}`, { title: "MonoCode" });
+    await message(`Couldn't install the update.\n\n${error}`, { title: "Avenrail" });
     return failed;
   }
 }

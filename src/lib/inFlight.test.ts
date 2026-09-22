@@ -24,6 +24,20 @@ function chat(
 }
 
 describe("isInFlightSession", () => {
+  it("resumes legacy quit markers after the rebrand without duplicating them", () => {
+    const session = chat("/tmp/old-project", {
+      providerSessionId: "saved-provider-session",
+      blocks: [
+        { id: "user", role: "user", text: "continue building" },
+        { id: "interrupted", role: "system", text: "Turn interrupted when MonoCode quit." },
+      ],
+    });
+    expect(canAutoContinue(session)).toBe(true);
+    expect(markTurnInterrupted(session).blocks).toEqual(session.blocks);
+    const continued = { ...session, blocks: [...session.blocks, { id: "next", role: "user" as const, text: "continue" }] };
+    expect(canAutoContinue(continued)).toBe(false);
+    expect(markTurnInterrupted(continued).blocks.at(-1)?.text).toBe("Turn interrupted when Avenrail quit.");
+  });
   it("is true for a busy turn or a live approval", () => {
     expect(isInFlightSession(chat("/tmp/a"))).toBe(false);
     expect(isInFlightSession(chat("/tmp/a", { busy: true }))).toBe(true);

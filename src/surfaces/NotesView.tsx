@@ -1,4 +1,4 @@
-import { LoaderCircle, Plus, Search, File, Trash2 } from "lucide-react";
+import { ChevronLeft, LoaderCircle, Plus, Search, File, Trash2 } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -11,6 +11,7 @@ import {
 import { useMarkdownMode } from "../chrome/MarkdownModeToggle";
 import { ProjectLogoIcon } from "../chrome/ProjectLogoIcon";
 import { ProjectMascot } from "../chrome/ProjectMascot";
+import { IconButton } from "../chrome/TitleBar";
 import { WindowControls } from "../chrome/WindowControls";
 import { useDragResize } from "../hooks/useDragResize";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
@@ -277,6 +278,13 @@ export function NotesView({ besideRail = false, cwd, onClose }: Props) {
       >
         {IS_MAC && !besideRail ? (
           <div className="w-[78px] shrink-0" data-tauri-drag-region />
+        ) : null}
+        {!besideRail && onClose ? (
+          <div className="pl-2">
+            <IconButton label="Back to workspace" onClick={onClose}>
+              <ChevronLeft className="size-3.5" strokeWidth={1.75} />
+            </IconButton>
+          </div>
         ) : null}
         <div
           className="flex min-w-0 flex-1 items-center gap-2 px-3 text-[13px]"

@@ -47,6 +47,7 @@ import {
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { HarnessIcon } from "./HarnessIcon";
 import { MOD } from "../lib/platform";
+import { composerOptionsPlacement } from "../lib/composerOptions";
 
 type Props = {
   harness: HarnessId;
@@ -59,17 +60,15 @@ type Props = {
 const MENU_WIDTH = 300;
 
 function menuStyle(anchor: DOMRect): CSSProperties {
-  const width = Math.min(MENU_WIDTH, window.innerWidth - 16);
-  const left = Math.min(
-    Math.max(8, anchor.left),
-    window.innerWidth - width - 8,
+  const placement = composerOptionsPlacement(
+    { right: anchor.left + MENU_WIDTH, top: anchor.top, bottom: anchor.bottom },
+    { width: window.innerWidth, height: window.innerHeight },
+    MENU_WIDTH,
   );
   return {
     position: "fixed",
-    left,
-    bottom: window.innerHeight - anchor.top + 6,
-    width,
-    height: Math.max(180, Math.min(340, anchor.top - 12)),
+    ...placement,
+    height: Math.min(340, placement.maxHeight),
     zIndex: 80,
   };
 }
@@ -193,10 +192,10 @@ export function ModelPicker({
   useEffect(() => {
     const inBlockingUi = (target: EventTarget | null) => {
       if (!(target instanceof Element)) return false;
-      if (target.closest(".monocode-terminal")) return true;
+      if (target.closest(".avenrail-terminal")) return true;
       return Boolean(
         target.closest(
-          "[data-file-picker], [data-branch-picker], [data-skill-picker], [data-mention-picker], [data-access-picker], [data-model-settings]",
+          "[data-composer-options], [data-file-picker], [data-branch-picker], [data-skill-picker], [data-mention-picker], [data-access-picker], [data-model-settings]",
         ),
       );
     };
@@ -338,9 +337,10 @@ export function ModelPicker({
   };
 
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="composer-model-picker relative min-w-0">
       <button
         type="button"
+        data-model-trigger
         title={`${HARNESS_TITLE[current.harness]} · ${current.name} (${MOD}.)`}
         aria-label={`${HARNESS_TITLE[current.harness]} ${current.name}`}
         aria-keyshortcuts={`${MOD}.`}
@@ -361,15 +361,13 @@ export function ModelPicker({
         }`}
       >
         <HarnessIcon harness={current.harness} className="size-4 shrink-0" />
-        <span className="min-w-0 truncate text-[11px]">{current.name}</span>
+        <span data-model-label className="min-w-0 truncate text-[11px]">{current.name}</span>
         <ChevronDown
           className={`size-3 shrink-0 text-content/50 ${open ? "rotate-180" : ""}`}
           strokeWidth={1.75}
         />
       </button>
-      {/* Portalled: the composer box is a `z-10` stacking context, so an inline
-          fixed menu loses to anything painted above it — in a split pane the
-          arcade backdrop swallowed the list (#29). */}
+      {/* Keep the menu above the composer's stacking context and split panes. */}
       {open && menu
         ? createPortal(
             <div

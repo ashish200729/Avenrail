@@ -19,6 +19,7 @@ type Props = {
   onPaneDragStart?: (event: ReactPointerEvent<HTMLElement>) => void;
   label?: string;
   trailing?: ReactNode;
+  variant?: "file" | "terminal";
 };
 
 /** Mirrors the VS Code tab tooltip: the path, then what is wrong with it. */
@@ -38,12 +39,15 @@ export function SurfaceTabs({
   onPaneDragStart,
   label = "Open files",
   trailing,
+  variant = "file",
 }: Props) {
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
   const activeTabRef = useRef<HTMLDivElement | null>(null);
+  const tabButtons = useRef(new Map<string, HTMLButtonElement>());
   const fileIds = files.map((file) => file.id);
   const sortable = useSortable(fileIds, onReorder);
   const canDrag = files.length > 1;
+  const terminalStyle = variant === "terminal";
 
   useLayoutEffect(() => {
     if (sortable.draggingId) return;
@@ -54,12 +58,12 @@ export function SurfaceTabs({
   }, [activeFileId, sortable.draggingId]);
 
   return (
-    <div className="flex h-9 min-w-0 shrink-0 border-b border-content/10 bg-content/2">
+    <div className={`flex h-9 min-w-0 shrink-0 border-b border-content/10 ${terminalStyle ? "" : "bg-content/2"}`}>
       <div
         ref={lockOverscroll}
         role="tablist"
         aria-label={label}
-        className="scrollbar-none flex min-w-0 flex-1 overflow-x-auto overscroll-none"
+        className={`scrollbar-none flex min-w-0 flex-1 overflow-x-auto overscroll-none ${terminalStyle ? "gap-1 p-1" : ""}`}
       >
       {onPaneDragStart ? (
         <div
@@ -109,7 +113,7 @@ export function SurfaceTabs({
               sortable.setItemRef(file.id, el);
               if (el && file.id === activeFileId) activeTabRef.current = el;
             }}
-            className={`group relative flex w-52 min-w-28 shrink touch-none items-stretch border-r border-content/10 ${
+            className={`group relative flex touch-none items-stretch ${terminalStyle ? "min-w-24 max-w-48 shrink-0 rounded-md" : "w-52 min-w-28 shrink border-r border-content/10"} ${
               active ? "bg-content/8" : "hover:bg-content/5"
             } ${dragging ? "opacity-40" : ""} ${
               canDrag ? "cursor-grab active:cursor-grabbing" : ""
@@ -132,9 +136,26 @@ export function SurfaceTabs({
               <div className="pointer-events-none absolute inset-y-0 right-0 z-20 w-0.5 bg-accent" />
             ) : null}
             <button
+              ref={(element) => {
+                if (element) tabButtons.current.set(file.id, element);
+                else tabButtons.current.delete(file.id);
+              }}
               type="button"
               role="tab"
               aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              onKeyDown={(event) => {
+                const nextIndex = event.key === "ArrowRight" ? (index + 1) % files.length
+                  : event.key === "ArrowLeft" ? (index - 1 + files.length) % files.length
+                  : event.key === "Home" ? 0
+                  : event.key === "End" ? files.length - 1 : null;
+                if (nextIndex != null) {
+                  event.preventDefault();
+                  const next = files[nextIndex];
+                  onSelectFile(next.id);
+                  tabButtons.current.get(next.id)?.focus();
+                }
+              }}
               title={appendProblems(
                 isPlanTab(file)
                   ? name
@@ -149,7 +170,7 @@ export function SurfaceTabs({
                 if (sortable.consumeClick()) return;
                 onSelectFile(file.id);
               }}
-              className={`flex min-w-0 flex-1 items-center gap-1.5 px-3 pr-8 text-left text-[12px] ${
+              className={`flex min-w-0 flex-1 items-center gap-1.5 px-3 pr-8 text-left text-[12px] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent ${
                 canDrag ? "cursor-grab active:cursor-grabbing" : ""
               } ${
                 active ? "text-content" : "text-content/55 hover:text-content"
@@ -190,7 +211,7 @@ export function SurfaceTabs({
                 onCloseFile(file.id);
               }}
               className={`absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded text-content/50 hover:bg-content/10 hover:text-content ${
-                active ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                active ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
               }`}
             >
               <X className="size-3" strokeWidth={1.75} />

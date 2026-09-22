@@ -312,8 +312,8 @@ function ScopeButton({
 }
 
 function scopeLabel(skill: Skill): string {
-  if (skill.scope === "builtin") return "monocode";
+  if (skill.scope === "builtin") return "avenrail";
   if (skill.scope === "user") return "personal";
-  if (skill.source !== "agents" && skill.source !== "monocode") return skill.source;
+  if (skill.source !== "agents" && skill.source !== "avenrail") return skill.source;
   return "project";
 }

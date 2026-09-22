@@ -2,6 +2,6 @@
 
 fn main() {
     #[cfg(all(debug_assertions, target_os = "macos"))]
-    monocode_lib::ensure_macos_dev_bundle();
-    monocode_lib::run()
+    avenrail_lib::ensure_macos_dev_bundle();
+    avenrail_lib::run()
 }

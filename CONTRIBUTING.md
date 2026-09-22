@@ -1,6 +1,6 @@
 # Contributing
 
-MonoCode is early and I’m the only maintainer, so small and focused lands much faster than large and ambitious. Past that, the door is open - bug reports and fixes are genuinely welcome.
+Avenrail is early and I’m the only maintainer, so small and focused lands much faster than large and ambitious. Past that, the door is open - bug reports and fixes are genuinely welcome.
 
 ## Get it running
 
@@ -20,7 +20,7 @@ npm install
 npm run tauri dev
 ```
 
-One provider is enough. MonoCode probes for each CLI at startup and disables the ones it can’t find, with a hint about how to install them, so a missing Codex doesn’t stop you from working on anything else.
+One provider is enough. Avenrail probes for each CLI at startup and disables the ones it can’t find, with a hint about how to install them, so a missing Codex doesn’t stop you from working on anything else.
 
 ## Where things live
 
@@ -29,7 +29,7 @@ One provider is enough. MonoCode probes for each CLI at startup and disables the
 - `src/lib/harness/` - one adapter per provider, plus the registry they plug into
 - `src-tauri/src/` - the Rust side: PTYs, filesystem and git, session storage, native window
 
-`src/lib/harness/` is the most useful place to start if you want to fix something real. Each provider has an adapter (`claudeAdapter.ts`) that implements the shared `HarnessAdapter` lifecycle from `registry.ts`, and a protocol module (`claudeProtocol.ts`) that translates the CLI’s output into MonoCode’s own event types. The protocol modules are pure functions with unit tests beside them, so you can fix a Codex parsing bug with only Claude Code installed.
+`src/lib/harness/` is the most useful place to start if you want to fix something real. Each provider has an adapter (`claudeAdapter.ts`) that implements the shared `HarnessAdapter` lifecycle from `registry.ts`, and a protocol module (`claudeProtocol.ts`) that translates the CLI’s output into Avenrail’s own event types. The protocol modules are pure functions with unit tests beside them, so you can fix a Codex parsing bug with only Claude Code installed.
 
 ## Before you push
 
@@ -48,3 +48,25 @@ For anything that moves product direction - a new surface, new provider behavior
 I might close a PR, ask you to shrink it, or end up implementing the idea differently. That’s a call about scope and timing, not about you or the quality of your work.
 
 Be kind: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Security reports: [SECURITY.md](SECURITY.md).
+
+## Bringing in MonoCode changes
+
+The original [MonoCode repository](https://github.com/hardbeat920/monocode) is kept as the `upstream` remote. Avenrail has intentionally diverged, so review upstream work on a branch instead of pulling it directly into `main`.
+
+For a specific upstream fix:
+
+```bash
+git fetch upstream
+git switch -c upstream/<short-topic> main
+git cherry-pick <upstream-commit-sha>
+npm run check
+```
+
+For a broader sync, create a dedicated branch and merge `upstream/main` there. Resolve and test the complete integration before merging it into Avenrail's `main`:
+
+```bash
+git fetch upstream
+git switch -c sync/monocode main
+git merge --no-ff upstream/main
+npm run check
+```

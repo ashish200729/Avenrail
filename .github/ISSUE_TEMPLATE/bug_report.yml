@@ -1,16 +1,16 @@
 name: Bug report
-description: Report a problem in MonoCode
+description: Report a problem in Avenrail
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        MonoCode is macOS (Apple Silicon) only. Linux and Windows are out of scope.
+        Avenrail publishes macOS (Apple Silicon) builds and supports Linux source builds. Include your operating system and provider CLI version.
 
   - type: input
     id: version
     attributes:
-      label: MonoCode version
+      label: Avenrail version
       placeholder: "0.1.0"
     validations:
       required: true
@@ -18,8 +18,8 @@ body:
   - type: input
     id: macos
     attributes:
-      label: macOS version
-      placeholder: "15.5"
+      label: Operating system and version
+      placeholder: "macOS 15.5 or Ubuntu 24.04 / GNOME"
     validations:
       required: true
 
@@ -32,6 +32,9 @@ body:
         - Codex
         - Cursor
         - OpenCode
+        - Pi
+        - omp
+        - fx
         - Multiple / not sure
     validations:
       required: true

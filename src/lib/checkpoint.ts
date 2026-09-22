@@ -13,7 +13,7 @@ export type CheckpointStatus = {
   files: CheckpointFile[];
 };
 
-const REVIEW_CHANGED = "monocode-review-changed";
+const REVIEW_CHANGED = "avenrail-review-changed";
 
 export function notifyReviewChanged(sessionId?: string) {
   window.dispatchEvent(

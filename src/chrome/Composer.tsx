@@ -1,4 +1,11 @@
-import { ArrowUp, Plus, Square, StickyNote } from "lucide-react";
+import { useComposerOverflow } from "../hooks/useComposerOverflow";
+import { ModelSettings } from "./ModelSettings";
+import { AccessPicker } from "./AccessPicker";
+import {
+  observeComposerSizing,
+  resizeComposerField,
+} from "../lib/composerSizing";
+import { ArrowUp, Paperclip, Square, StickyNote } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -20,7 +27,7 @@ import {
   pickAttachments,
   revokeAttachment,
 } from "../lib/attachments";
-import type { ContextUsage } from "../lib/contextUsage";
+import { contextRatio, type ContextUsage } from "../lib/contextUsage";
 import {
   loadProjectFiles,
   peekProjectFiles,
@@ -56,7 +63,7 @@ import {
   type Skill,
   type SlashToken,
 } from "../lib/skills";
-import { AccessPicker } from "./AccessPicker";
+import { ComposerOptions } from "./ComposerOptions";
 import { ComposerRunner } from "./ComposerRunner";
 import { ContextMeter } from "./ContextMeter";
 import { AttachmentChip } from "./AttachmentChip";
@@ -67,7 +74,6 @@ import { FileTypeIcon } from "./FileTypeIcon";
 import { InboxMiniCard } from "./InboxMiniCard";
 import { NoteMiniCard } from "./NoteMiniCard";
 import { ModelPicker } from "./ModelPicker";
-import { ModelSettings } from "./ModelSettings";
 import { SkillPicker } from "./SkillPicker";
 import { projectName } from "../lib/paths";
 import { consumeQuoteRequest, type QuoteRequest } from "../lib/quoteDraft";
@@ -140,6 +146,7 @@ function ToolButton({
   return (
     <button
       type="button"
+      data-composer-fixed
       title={label}
       aria-label={label}
       disabled={disabled}
@@ -191,6 +198,13 @@ export function Composer({
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const inlineOptionsRef = useRef<HTMLDivElement>(null);
+  const groupedOptions = useComposerOverflow(
+    controlsRef,
+    inlineOptionsRef,
+    () => ref.current?.focus(),
+  );
   const highlightRef = useRef<HTMLDivElement>(null);
   const attachmentsRef = useRef<Attachment[]>([]);
   const consumedQuoteId = useRef<number | null>(null);
@@ -243,8 +257,7 @@ export function Composer({
     [skills],
   );
   const mentionFiles = useMemo(
-    () =>
-      notesEnabled ? [...files, ...notesAsProjectFiles(notes)] : files,
+    () => (notesEnabled ? [...files, ...notesAsProjectFiles(notes)] : files),
     [files, notes, notesEnabled],
   );
   const mentionIndex = useMemo(
@@ -390,9 +403,14 @@ export function Composer({
   }, [rankedFiles.length]);
 
   const resizeTextarea = (el: HTMLTextAreaElement) => {
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    resizeComposerField(el, highlightRef.current);
   };
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    return observeComposerSizing(el, () => highlightRef.current);
+  }, [shell]);
 
   useEffect(() => {
     const el = ref.current;
@@ -723,7 +741,7 @@ export function Composer({
   return (
     <div
       data-composer
-      className={`relative shrink-0 ${shell ? "" : "p-1.5 pt-0"}`}
+      className={`relative min-w-0 shrink-0 ${shell ? "" : "p-1.5 pt-0"}`}
       onMouseDown={onFocus}
     >
       {children}
@@ -790,9 +808,7 @@ export function Composer({
               files={rankedFiles}
               query={mention?.query ?? ""}
               active={mentionActive}
-              loading={
-                looksLikeProject(cwd) && peekProjectFiles(cwd) == null
-              }
+              loading={looksLikeProject(cwd) && peekProjectFiles(cwd) == null}
               includeNotes={notesEnabled}
               onActive={setMentionActive}
               onPick={pickMention}
@@ -802,41 +818,17 @@ export function Composer({
         <div
           ref={boxRef}
           data-composer-box
-          className={`relative z-10 rounded-lg border bg-content/3 ${
+          className={`relative z-10 rounded-xl border bg-content/3 ${
             fileDrag
               ? "border-accent/60"
               : "border-content/10 has-focus:border-content/20"
           }`}
         >
           {fileDrag ? (
-            <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-lg bg-accent/8 text-[12px] text-content/70">
+            <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-xl bg-accent/8 text-[12px] text-content/70">
               Drop files to attach
             </div>
           ) : null}
-          <div className="flex min-w-0 items-center gap-2.5 px-3 pt-2.5">
-            {hideProjectPicker ? null : (
-              <CwdPicker
-                cwd={cwd}
-                recents={recents}
-                projectLogoPath={projectLogoPath}
-                enabled={enabled}
-                onCwdChange={onCwdChange}
-                onNewTerminal={onNewTerminal}
-                onClose={() => ref.current?.focus()}
-              />
-            )}
-            <BranchPicker
-              cwd={cwd}
-              branch={branch}
-              enabled={enabled && !busy}
-              onChange={onBranchChange}
-              onClose={() => ref.current?.focus()}
-            />
-            <div className="ml-auto flex shrink-0 items-center">
-              <ContextMeter usage={context} />
-            </div>
-          </div>
-
           {attachments.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 px-3 pt-2">
               {attachments.map((file) => (
@@ -885,7 +877,7 @@ export function Composer({
                       ? "How can I help you today?"
                       : "Ask, build, / for skills, @ for references... "
               }
-              className={`composer-field relative max-h-40 w-full resize-none overflow-x-hidden whitespace-pre-wrap break-words bg-transparent px-3 text-sm leading-5.5 outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap font-sans ${
+              className={`composer-field app-scrollbar relative max-h-40 w-full resize-none overflow-x-hidden whitespace-pre-wrap break-words bg-transparent px-3 text-sm leading-5.5 outline-none placeholder:overflow-hidden placeholder:text-ellipsis placeholder:whitespace-nowrap font-sans ${
                 shell ? "py-4" : "py-3"
               }`}
               onFocus={onFocus}
@@ -905,66 +897,111 @@ export function Composer({
             />
           </div>
 
-          <div className="flex items-center gap-1 px-2 pb-2">
-            <ToolButton
-              label={
-                attachmentsSupported
-                  ? "Attach files"
-                  : "fx does not support attachments"
-              }
-              disabled={!attachmentsSupported}
-              onClick={attachFromPicker}
-            >
-              <Plus className="size-3.5" strokeWidth={1.5} />
-            </ToolButton>
+          <div className="composer-footer">
+            {!hideProjectPicker || contextRatio(context) !== null ? (
+              <div className="flex min-h-5 min-w-0 items-center gap-2 px-3 pb-1.5">
+                {hideProjectPicker ? null : (
+                  <CwdPicker
+                    cwd={cwd}
+                    recents={recents}
+                    projectLogoPath={projectLogoPath}
+                    enabled={enabled}
+                    onCwdChange={onCwdChange}
+                    onNewTerminal={onNewTerminal}
+                    onClose={() => ref.current?.focus()}
+                  />
+                )}
+                <div className="ml-auto flex shrink-0 items-center">
+                  <ContextMeter usage={context} />
+                </div>
+              </div>
+            ) : null}
             <div
-              className="composer-toolbar flex min-w-0 flex-1 items-center"
-              onWheel={(e) => {
-                if (
-                  e.target instanceof Element &&
-                  e.target.closest(
-                    "[data-model-picker], [data-access-picker], [data-model-settings]",
-                  )
-                ) {
-                  return;
-                }
-                const el = e.currentTarget;
-                if (el.scrollWidth <= el.clientWidth) return;
-                if (e.deltaX === 0 && e.deltaY !== 0) el.scrollLeft += e.deltaY;
-              }}
+              ref={controlsRef}
+              className="composer-controls relative flex min-w-0 flex-nowrap items-center gap-1 px-2 pb-2"
             >
-              <div className="flex shrink-0 items-center gap-1">
-                <ModelPicker
-                  harness={harness}
-                  model={model}
-                  hotkeys={hotkeys && enabled}
-                  onChange={onModelChange}
-                  onClose={() => ref.current?.focus()}
-                />
-                <ModelSettings
+              <ToolButton
+                label={
+                  attachmentsSupported
+                    ? "Attach files"
+                    : "fx does not support attachments"
+                }
+                disabled={!attachmentsSupported}
+                onClick={attachFromPicker}
+              >
+                <Paperclip className="size-3.5" strokeWidth={1.75} />
+              </ToolButton>
+              <ModelPicker
+                harness={harness}
+                model={model}
+                hotkeys={hotkeys && enabled}
+                onChange={onModelChange}
+                onClose={() => ref.current?.focus()}
+              />
+              <div
+                className={
+                  groupedOptions ? "composer-inline-measure" : "contents"
+                }
+                inert={groupedOptions || undefined}
+                aria-hidden={groupedOptions || undefined}
+              >
+                <div ref={inlineOptionsRef} className="composer-inline-options">
+                  <ModelSettings
+                    key={`model:${groupedOptions}:${harness}:${model}`}
+                    harness={harness}
+                    model={model}
+                    values={modelSettings}
+                    enabled={enabled && !groupedOptions}
+                    onChange={(settings) => onModelSettingsChange?.(settings)}
+                    onClose={() => ref.current?.focus()}
+                  />
+                  {harness !== "fx" ? (
+                    <AccessPicker
+                      key={`access:${groupedOptions}`}
+                      value={runtimeMode}
+                      enabled={enabled && !groupedOptions}
+                      onChange={onRuntimeModeChange}
+                      onClose={() => ref.current?.focus()}
+                    />
+                  ) : null}
+                </div>
+              </div>
+              {groupedOptions ? (
+                <ComposerOptions
+                  key={`${cwd}:${harness}:${model}`}
+                  enabled={enabled}
                   harness={harness}
                   model={model}
                   values={modelSettings}
-                  onChange={(settings) => onModelSettingsChange?.(settings)}
+                  runtimeMode={runtimeMode}
+                  onSettingsChange={(settings) =>
+                    onModelSettingsChange?.(settings)
+                  }
+                  onRuntimeModeChange={onRuntimeModeChange}
                   onClose={() => ref.current?.focus()}
                 />
-                {harness !== "fx" ? (
-                  <AccessPicker
-                    value={runtimeMode}
-                    onChange={onRuntimeModeChange}
-                    onClose={() => ref.current?.focus()}
+              ) : null}
+              <div
+                data-composer-fixed
+                className="composer-submit-controls ml-auto flex min-w-0 shrink-0 items-center gap-2"
+              >
+                <BranchPicker
+                  compact
+                  cwd={cwd}
+                  branch={branch}
+                  enabled={enabled && !busy}
+                  onChange={onBranchChange}
+                  onClose={() => ref.current?.focus()}
+                />
+                <div className="flex shrink-0 items-center gap-1">
+                  <ComposerAction
+                    busy={busy}
+                    hasValue={hasValue}
+                    onSend={() => submit(ref.current?.value ?? "")}
+                    onStop={() => onStop?.()}
                   />
-                ) : null}
+                </div>
               </div>
-            </div>
-
-            <div className="flex shrink-0 items-center gap-1">
-              <ComposerAction
-                busy={busy}
-                hasValue={hasValue}
-                onSend={() => submit(ref.current?.value ?? "")}
-                onStop={() => onStop?.()}
-              />
             </div>
           </div>
         </div>

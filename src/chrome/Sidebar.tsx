@@ -1,11 +1,14 @@
 import {
   Check,
   CircleAlert,
+  File,
   GitBranch,
   ListFilter,
-  Plus,
+  MoreHorizontal,
   Search,
   Settings,
+  Terminal,
+  X,
 } from "lucide-react";
 import {
   memo,
@@ -23,7 +26,7 @@ import {
   type SidebarTabId,
 } from "../lib/appearance";
 import { basename } from "../lib/fs";
-import { IS_MAC, MOD } from "../lib/platform";
+import { MOD } from "../lib/platform";
 import { resolveModel } from "../lib/models";
 import { projectName } from "../lib/paths";
 import { sessionDisplayTitle } from "../lib/session";
@@ -42,19 +45,28 @@ import {
   saveSessionSidebarFilters,
   type SessionSidebarFilters,
 } from "../lib/sessionFilters";
-import type { HarnessId } from "../lib/session";
 import type { SessionSummary } from "../lib/sessionStore";
+import {
+  orderedSidebarSessions,
+  visibleSidebarSessions,
+} from "../lib/sidebarOrganization";
+import type { SidebarOpenItem } from "../lib/sidebarNavigation";
 import type { SettingsSectionId } from "../lib/settings";
 import { resolveTabGroupLogo } from "../lib/tabGroups";
 import { useDragResize } from "../hooks/useDragResize";
 import { useGitFileStatuses } from "../hooks/useGitFileStatuses";
 import { useInboxUnseen } from "../hooks/useInboxUnseen";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
-import { useProjectDiffStats } from "../hooks/useProjectDiffStats";
 import { useSessionDiffStats } from "../hooks/useSessionDiffStats";
 import { useSortable } from "../hooks/useSortable";
 import { useTabGroupLogos } from "../hooks/useTabGroupLogos";
-import { looksLikeProject, type RecentProject } from "../lib/recents";
+import {
+  collectRailProjects,
+  looksLikeProject,
+  normalizeProjectPath,
+  sameProjectPath,
+  type RecentProject,
+} from "../lib/recents";
 import { ExplorerMenu, type ExplorerMenuItem } from "./ExplorerMenu";
 import { FileTree } from "./FileTree";
 import { FileTypeIcon } from "./FileTypeIcon";
@@ -63,13 +75,12 @@ import { ProjectRail } from "./ProjectRail";
 import { RailAction } from "./RailAction";
 import { SettingsNav } from "./SettingsRail";
 import { TerminalSpinner } from "./TerminalSpinner";
-import { IconButton, TabVisitNav } from "./TitleBar";
+import { TabVisitNav } from "./TitleBar";
 import { ProjectSearch } from "./ProjectSearch";
 import { ProjectLogoIcon } from "./ProjectLogoIcon";
 import { SessionFiltersMenu } from "./SessionFiltersMenu";
 import { SessionsEmpty } from "./SessionsEmpty";
 import { SidebarUpdate } from "./SidebarUpdate";
-import { SourceControl } from "./SourceControl";
 import { InboxView } from "../surfaces/InboxView";
 
 const MIN_WIDTH = 260;
@@ -94,6 +105,16 @@ type Props = {
   open: boolean;
   layout: SidebarLayout;
   sessions: SessionSummary[];
+  allSessions?: SessionSummary[];
+  allOpenItems?: SidebarOpenItem[];
+  loadedProjects?: ReadonlySet<string>;
+  errorProjects?: ReadonlySet<string>;
+  onRefreshProject?: (path: string) => void;
+  openItems?: SidebarOpenItem[];
+  activeTabId?: string;
+  openSessionTabs?: Map<string, string>;
+  onSelectOpenItem?: (item: SidebarOpenItem) => void;
+  onCloseOpenTab?: (tabId: string) => void;
   busySessionIds: Set<string>;
   approvalSessionIds: Set<string>;
   activeSessionId?: string;
@@ -118,9 +139,6 @@ type Props = {
   canGoForward?: boolean;
   onGoBack?: () => void;
   onGoForward?: () => void;
-  onOpenDiff?: (path: string) => void;
-  selectedDiffPath?: string;
-  textHarness?: HarnessId;
   onShowSourceControl?: () => void;
   recents?: RecentProject[];
   busyProjectPaths?: Iterable<string>;
@@ -131,7 +149,6 @@ type Props = {
   onSearch?: () => void;
   onOpenInbox?: () => void;
   onOpenNotes?: () => void;
-  onGoToFile?: () => void;
   searchActive?: boolean;
   inboxActive?: boolean;
   notesActive?: boolean;
@@ -152,6 +169,16 @@ function SidebarComponent({
   open,
   layout,
   sessions,
+  allSessions,
+  allOpenItems,
+  loadedProjects,
+  errorProjects,
+  onRefreshProject,
+  openItems = [],
+  activeTabId,
+  openSessionTabs,
+  onSelectOpenItem,
+  onCloseOpenTab,
   busySessionIds,
   approvalSessionIds,
   activeSessionId,
@@ -175,9 +202,6 @@ function SidebarComponent({
   canGoForward = false,
   onGoBack,
   onGoForward,
-  onOpenDiff,
-  selectedDiffPath,
-  textHarness,
   onShowSourceControl,
   recents = [],
   busyProjectPaths,
@@ -188,7 +212,6 @@ function SidebarComponent({
   onSearch,
   onOpenInbox,
   onOpenNotes,
-  onGoToFile,
   searchActive = false,
   inboxActive = false,
   notesActive = false,
@@ -234,7 +257,11 @@ function SidebarComponent({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const sessionMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const deckLayout = layout === "deck";
+  const sessionRows = deckLayout ? (allSessions ?? sessions) : sessions;
+  const draftRows = deckLayout ? (allOpenItems ?? openItems) : openItems;
+  const [rowLimits, setRowLimits] = useState<Record<string, number>>({});
   const busyIdsRef = useRef(busySessionIds);
   const focusedSessionIdRef = useRef(activeSessionId);
   const unseenFinishedLocalRef = useRef<Set<string>>(new Set());
@@ -260,7 +287,7 @@ function SidebarComponent({
     filterSessionsByStatus(
       filterSessionsByTime(
         filterSessionsByHarness(
-          filterSessionsByArchive(sessions, sessionFilters.showArchived),
+          filterSessionsByArchive(sessionRows, sessionFilters.showArchived),
           sessionFilters.hiddenHarnesses,
         ),
         sessionFilters.time,
@@ -271,12 +298,12 @@ function SidebarComponent({
       approvalSessionIds,
       unseenFinishedIds,
     ),
-    deckLayout || searchOpen ? searchQuery : "",
+    !deckLayout && searchOpen ? searchQuery : "",
   );
-  const sessionHarnesses = harnessesInSessions(sessions);
+  const sessionHarnesses = harnessesInSessions(sessionRows);
   const filtersActive = hasActiveSessionFilters(sessionFilters);
   const searchNarrowed = Boolean(
-    (deckLayout || searchOpen) && searchQuery.trim(),
+    !deckLayout && searchOpen && searchQuery.trim(),
   );
   const narrowedByUser = searchNarrowed || filtersActive;
   const sortable = useSortable(tabOrder, (ids) => {
@@ -285,50 +312,45 @@ function SidebarComponent({
     saveSidebarTabOrder(next);
     if (next[0]) onTabChange(next[0]);
   });
-  const visibleTabs = deckLayout
-    ? tabOrder.filter((itemId) => itemId !== "inbox")
-    : tabOrder.filter((itemId) => itemId !== "changes");
+  const visibleTabs = tabOrder.filter((itemId) => itemId !== "changes");
   const canDragTabs = visibleTabs.length > 1;
   const showProjectRail =
     deckLayout && Boolean(onSelectProject && onOpenProject);
   // Settings live in the rail slot, so they keep it visible even when the
   // project rail itself is collapsed.
   const railVisible = showProjectRail && (projectRailOpen || settingsOpen);
-  const inProject = looksLikeProject(cwd);
   const classicSettings = settingsOpen && !deckLayout;
-  const showSidebarFooter = !deckLayout || !projectRailOpen;
-  // A blank session has no project to browse, so the shell stands alone until
-  // one is picked — whether or not the rail is open. Classic settings keep the
-  // sidebar so it can host the section nav the rail would otherwise carry.
+  // Deck has one navigation column. The original sidebar is only for Classic;
+  // its settings section navigation stays visible even with no project.
   const sidebarVisible =
-    open &&
-    !searchActive &&
-    !inboxActive &&
-    !notesActive &&
-    (classicSettings || (!settingsOpen && !(deckLayout && !inProject)));
-  const gitStatuses = useGitFileStatuses(gitRoot, open && tab === "files");
-  const changeStats = useProjectDiffStats(gitRoot, open);
+    !deckLayout && open && !searchActive && !inboxActive && !notesActive;
+  const gitStatuses = useGitFileStatuses(
+    gitRoot,
+    !deckLayout && sidebarVisible && tab === "files",
+  );
   const groupLogos = useTabGroupLogos();
   const projectLogoPath = resolveTabGroupLogo(projectName(cwd), groupLogos);
   const sessionDiffs = useSessionDiffStats(
     cwd,
     sessions.map((session) => session.id),
-    open && tab === "sessions",
+    deckLayout
+      ? railVisible && !settingsOpen
+      : sidebarVisible && tab === "sessions",
   );
 
   useEffect(() => {
-    if (tab !== "sessions") return;
+    if (!deckLayout && tab !== "sessions") return;
     const id = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(id);
-  }, [tab]);
+  }, [deckLayout, tab]);
 
   useEffect(() => {
-    if (tab !== "sessions") {
+    if (!deckLayout && tab !== "sessions") {
       setFilterMenu(null);
       setSearchOpen(false);
       setSearchQuery("");
     }
-  }, [tab]);
+  }, [deckLayout, tab]);
 
   useEffect(() => {
     if (!sessionMenu && !filterMenu) return;
@@ -336,15 +358,42 @@ function SidebarComponent({
       setSessionMenu(null);
       setFilterMenu(null);
     };
-    const scrollParent = sessionsScrollRef.current ?? window;
+    const scrollParent = deckLayout
+      ? window
+      : (sessionsScrollRef.current ?? window);
     scrollParent.addEventListener("scroll", onScroll, true);
     return () => scrollParent.removeEventListener("scroll", onScroll, true);
-  }, [sessionMenu, filterMenu]);
+  }, [deckLayout, sessionMenu, filterMenu]);
+
+  useEffect(() => {
+    setSessionMenu(null);
+    setFilterMenu(null);
+    setRenamingSessionId(null);
+    setSearchQuery("");
+    setSessionFilters(loadSessionSidebarFilters());
+  }, [
+    cwd,
+    settingsOpen,
+    projectRailOpen,
+    searchActive,
+    inboxActive,
+    notesActive,
+  ]);
 
   const menuSession = sessionMenu
-    ? sessions.find((session) => session.id === sessionMenu.sessionId)
+    ? sessionRows.find((session) => session.id === sessionMenu.sessionId)
     : undefined;
   const sessionMenuItems: ExplorerMenuItem[] = [
+    ...(onCloseOpenTab && menuSession && openSessionTabs?.has(menuSession.id)
+      ? [
+          {
+            kind: "item" as const,
+            id: "close-tab",
+            label: "Close session tab",
+          },
+          { kind: "sep" as const },
+        ]
+      : []),
     ...(onRenameSession
       ? [
           {
@@ -390,7 +439,13 @@ function SidebarComponent({
     e.preventDefault();
     e.stopPropagation();
     setFilterMenu(null);
-    setSessionMenu({ x: e.clientX, y: e.clientY, sessionId });
+    sessionMenuTriggerRef.current = e.type === "click" ? e.currentTarget : null;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setSessionMenu({
+      x: e.type === "click" ? rect.right - 228 : e.clientX,
+      y: e.type === "click" ? rect.bottom + 4 : e.clientY,
+      sessionId,
+    });
   };
 
   const onSessionMenuPick = (id: string) => {
@@ -398,6 +453,11 @@ function SidebarComponent({
     const sessionId = sessionMenu.sessionId;
     const archived = !!menuSession?.archived;
     setSessionMenu(null);
+    if (id === "close-tab") {
+      const tabId = openSessionTabs?.get(sessionId);
+      if (tabId) onCloseOpenTab?.(tabId);
+      return;
+    }
     if (id === "rename") {
       setRenamingSessionId(sessionId);
       return;
@@ -459,7 +519,7 @@ function SidebarComponent({
       }}
       className={
         deckLayout
-          ? "h-full w-full min-w-0 rounded-md bg-transparent py-0 pl-7 pr-2 text-[12px] text-content outline-none placeholder:text-content/35"
+          ? "h-full w-full min-w-0 rounded-md bg-transparent py-0 pl-7 pr-2 text-[12px] text-content outline-none placeholder:text-content/60"
           : "w-full px-3 py-2 text-[12px] text-content outline-none placeholder:text-content/35"
       }
     />
@@ -475,13 +535,8 @@ function SidebarComponent({
     onTabChange(itemId);
   };
 
-  const changeAdditions = changeStats?.additions ?? 0;
-  const changeDeletions = changeStats?.deletions ?? 0;
-  const hasChangeStats = changeAdditions > 0 || changeDeletions > 0;
-
   const workspaceTabItems = visibleTabs.map((itemId, index) => {
     const active = tab === itemId;
-    const isChangesTab = itemId === "changes";
     const draggingTab = sortable.draggingId === itemId;
     const showStart =
       sortable.draggingId &&
@@ -516,19 +571,6 @@ function SidebarComponent({
           type="button"
           role="tab"
           aria-selected={active}
-          aria-label={
-            isChangesTab
-              ? hasChangeStats
-                ? [
-                    "Changes",
-                    changeAdditions > 0 ? `+${changeAdditions}` : "",
-                    changeDeletions > 0 ? `-${changeDeletions}` : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")
-                : "Changes"
-              : undefined
-          }
           data-tauri-drag-region="false"
           onClick={() => {
             if (sortable.consumeClick()) return;
@@ -540,133 +582,214 @@ function SidebarComponent({
               : "text-content/50 hover:bg-content/5 hover:text-content"
           } ${canDragTabs ? "cursor-grab active:cursor-grabbing" : ""}`}
         >
-          {isChangesTab && hasChangeStats ? (
-            <DiffStat
-              additions={changeAdditions}
-              deletions={changeDeletions}
-            />
-          ) : (
-            <span className="block truncate">{TAB_LABELS[itemId]}</span>
-          )}
+          <span className="block truncate">{TAB_LABELS[itemId]}</span>
         </button>
       </div>
     );
   });
 
-  const sidebarContent = (
-    <aside
-      ref={resize.setPaneRef}
-      className="sidebar-glass relative flex h-full min-h-0 shrink-0 flex-col border-r border-content/10"
-    >
-      {deckLayout && railVisible ? (
-        <>
-          <div
-            className="flex h-10 shrink-0 items-center gap-1 border-b border-content/10 pl-3 pr-1.5"
-            data-tauri-drag-region
+  const renderOpenRows = (items: SidebarOpenItem[]) => (
+    <ul aria-label="Open sessions" className="flex flex-col gap-0.5 pb-1">
+      {items.map((item) => (
+        <li
+          key={item.id}
+          className="sidebar-session-row group relative rounded-lg"
+          data-active={
+            (item.tabId === activeTabId &&
+              (!item.sessionId || item.sessionId === activeSessionId)) ||
+            undefined
+          }
+        >
+          <button
+            type="button"
+            title={item.title}
+            aria-current={
+              item.tabId === activeTabId &&
+              (!item.sessionId || item.sessionId === activeSessionId)
+                ? "page"
+                : undefined
+            }
+            onClick={() => onSelectOpenItem?.(item)}
+            className="flex min-h-8 w-full min-w-0 items-center gap-1.5 rounded-lg px-2 py-1.5 pr-8 text-left text-[13px] text-content/85 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
           >
-            <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">
-              Workspace
+            {item.harness ? (
+              <HarnessIcon
+                harness={item.harness}
+                className="size-3.5 shrink-0"
+              />
+            ) : item.kind === "terminal" ? (
+              <Terminal className="size-3.5 shrink-0" />
+            ) : (
+              <File className="size-3.5 shrink-0" />
+            )}
+            <span className="min-w-0 flex-1 truncate font-medium">
+              {item.title}
             </span>
-            <WorkspaceTitleActions onSearch={onGoToFile} onNew={onNew} />
-          </div>
-          <div
-            role="tablist"
-            aria-label="Workspace"
-            className="flex h-9 shrink-0 items-center gap-px border-b border-content/10 px-2"
-          >
-            {workspaceTabItems}
-          </div>
-        </>
-      ) : (
-        <>
-          {deckLayout ? (
-            <div
-              className="flex h-10 shrink-0 items-center border-b border-content/10 pr-1.5"
-              data-tauri-drag-region
+            {item.kind === "draft" ? (
+              <span className="sidebar-session-meta shrink-0 text-[10px]">
+                Draft
+              </span>
+            ) : null}
+          </button>
+          {onCloseOpenTab && item.canCloseTab !== false ? (
+            <button
+              type="button"
+              aria-label={`Close ${item.title}`}
+              onClick={() => onCloseOpenTab(item.tabId)}
+              className="absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded text-content/50 opacity-0 hover:bg-content/10 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:outline-2 focus-visible:outline-accent"
             >
-              {IS_MAC ? (
-                <div className="w-[78px] shrink-0" data-tauri-drag-region />
-              ) : null}
-              <div className="min-w-0 flex-1" data-tauri-drag-region />
-              <TabVisitNav
-                canGoBack={canGoBack}
-                canGoForward={canGoForward}
-                onGoBack={onGoBack}
-                onGoForward={onGoForward}
-                onTogglePanel={onToggleProjectRail}
-                panelActive={false}
-              />
-            </div>
-          ) : (
-            <div
-              className="flex h-9.75 shrink-0 items-center justify-end pr-1.5"
-              data-tauri-drag-region
-            >
-              <TabVisitNav
-                canGoBack={canGoBack}
-                canGoForward={canGoForward}
-                onGoBack={onGoBack}
-                onGoForward={onGoForward}
-              />
-            </div>
-          )}
-          {classicSettings ? null : (
-            <div
-              role="tablist"
-              aria-label="Workspace"
-              className={`flex h-9 shrink-0 items-center gap-px overflow-visible border-content/10 px-2 ${
-                // Mirrors the rail-open header stack: each row owns its own
-                // bottom border, so the seams land on the title bar's.
-                deckLayout ? "border-b" : "border-y"
-              }`}
-            >
-              {workspaceTabItems}
-            </div>
-          )}
-        </>
-      )}
-      {classicSettings ? (
-        <SettingsNav
-          section={settingsSection}
-          onSelect={(next) => onSelectSettingsSection?.(next)}
-          onClose={() => onCloseSettings?.()}
-        />
-      ) : (
-        <>
-      <div
-        className={`flex min-h-0 flex-1 flex-col overflow-hidden ${
-          tab === "files" ? "" : "hidden"
-        }`}
-      >
-        {filesSearchOpen ? (
-          <ProjectSearch
-            cwd={gitRoot}
-            focusToken={searchFocusToken}
-            onOpenFile={onOpenFile}
-            onClose={() => onFilesSearchOpenChange(false)}
-          />
-        ) : cwd && cwd !== "~" ? (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <FileTree
-              key={gitRoot}
-              cwd={gitRoot}
-              deckLayout={deckLayout}
-              onOpenFile={onOpenFile}
-              onOpenTerminal={onOpenTerminal}
-              onFileMoved={onFileMoved}
-              onFileDeleted={onFileDeleted}
-              onSearch={onOpenFilesSearch}
-              gitStatuses={gitStatuses}
-              sourceControlActive={open && tab === "changes"}
-              onShowSourceControl={onShowSourceControl}
+              <X className="size-3" />
+            </button>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+  const renderSavedRows = (items: SessionSummary[]) => (
+    <ul className={`flex flex-col gap-0.5 ${deckLayout ? "pb-1" : "p-1.5"}`}>
+      {items.map((session) => (
+        <li key={session.id}>
+          {renamingSessionId === session.id && onRenameSession ? (
+            <SessionRenameRow
+              session={session}
+              isActive={session.id === activeSessionId}
+              busy={busySessionIds.has(session.id)}
+              needsApproval={approvalSessionIds.has(session.id)}
+              onCommit={(title) => {
+                onRenameSession(session.id, title);
+                setRenamingSessionId(null);
+              }}
+              onCancel={() => setRenamingSessionId(null)}
             />
-          </div>
-        ) : (
-          <p className="px-3 py-2 text-[12px] text-content/50">
-            No project folder
+          ) : (
+            <SessionCard
+              session={session}
+              compact={deckLayout}
+              isActive={session.id === activeSessionId}
+              busy={busySessionIds.has(session.id)}
+              done={unseenFinishedIds.has(session.id)}
+              needsApproval={approvalSessionIds.has(session.id)}
+              now={now}
+              additions={
+                (sameProjectPath(session.cwd, cwd)
+                  ? sessionDiffs[session.id]?.additions
+                  : undefined) ??
+                session.additions ??
+                0
+              }
+              deletions={
+                (sameProjectPath(session.cwd, cwd)
+                  ? sessionDiffs[session.id]?.deletions
+                  : undefined) ??
+                session.deletions ??
+                0
+              }
+              onSelect={onSelectSession}
+              onContextMenu={
+                onRenameSession || onArchiveSession || onDeleteSession
+                  ? (e) => onSessionContextMenu(session.id, e)
+                  : undefined
+              }
+              onRename={
+                onRenameSession
+                  ? () => setRenamingSessionId(session.id)
+                  : undefined
+              }
+              onDelete={
+                onDeleteSession ? () => onDeleteSession(session.id) : undefined
+              }
+            />
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+  const renderDeckSessions = (path?: string) => {
+    const key = path ? normalizeProjectPath(path) : "__all__";
+    const rows = orderedSidebarSessions(
+      path
+        ? visibleSessions.filter((row) => sameProjectPath(row.cwd, path))
+        : visibleSessions,
+    );
+    const drafts = path
+      ? draftRows.filter((row) => sameProjectPath(row.cwd ?? cwd, path))
+      : draftRows;
+    const { visible, remaining } = visibleSidebarSessions(
+      rows,
+      rowLimits[key] ?? (path ? 5 : 40),
+      activeSessionId,
+    );
+    const projects = path
+      ? looksLikeProject(path)
+        ? [normalizeProjectPath(path)]
+        : []
+      : [...collectRailProjects(recents, cwd).keys()];
+    const loading = loadedProjects
+      ? projects.some(
+          (project) =>
+            !loadedProjects.has(project) && !errorProjects?.has(project),
+        )
+      : pending;
+    const failed = errorProjects
+      ? projects.filter((project) => errorProjects.has(project))
+      : status === "error"
+        ? [cwd]
+        : [];
+    return (
+      <>
+        {drafts.length ? renderOpenRows(drafts) : null}
+        {visible.length ? renderSavedRows(visible) : null}
+        {remaining > 0 ? (
+          <button
+            type="button"
+            onClick={() =>
+              setRowLimits((previous) => ({
+                ...previous,
+                [key]: (previous[key] ?? (path ? 5 : 40)) + 20,
+              }))
+            }
+            className="flex h-7 w-full items-center rounded-md px-2 text-left text-[11px] text-content/60 hover:bg-content/5 hover:text-content"
+          >
+            Show more ({remaining})
+          </button>
+        ) : null}
+        {loading && !visible.length && !drafts.length ? (
+          <p className="px-2 py-1 text-[11px] text-content/55">
+            Loading sessions…
           </p>
-        )}
-      </div>
+        ) : null}
+        {failed.length ? (
+          <div className="px-2 py-1 text-[11px] text-content/60">
+            <span>Couldn’t load {path ? "sessions" : "some projects"}.</span>
+            {onRefreshProject ? (
+              <button
+                type="button"
+                onClick={() => failed.forEach(onRefreshProject)}
+                className="ml-1 underline underline-offset-2 hover:text-content"
+              >
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {!path &&
+        !loading &&
+        !failed.length &&
+        !visible.length &&
+        !drafts.length ? (
+          <p className="px-2 py-2 text-xs text-content/60">
+            {filtersActive
+              ? "No sessions match these filters"
+              : "Sessions you start will show up here"}
+          </p>
+        ) : null}
+      </>
+    );
+  };
+
+  const sessionContent = (
+    <>
+      {deckLayout && openItems.length > 0 ? renderOpenRows(openItems) : null}
       {!deckLayout && tab === "sessions" && cwd && cwd !== "~" ? (
         <div className="shrink-0 border-b border-content/10">
           <div className="flex h-9 items-center px-2 pr-1.5">
@@ -717,30 +840,13 @@ function SidebarComponent({
           ) : null}
         </div>
       ) : null}
-      {deckLayout && tab === "sessions" && cwd && cwd !== "~" ? (
-        <div className="flex h-9 shrink-0 items-center gap-1 border-b border-content/10 px-2">
-          <div className="relative flex h-7 min-w-0 flex-1 items-center">
-            <Search className="pointer-events-none absolute left-2 size-3 shrink-0 opacity-50" />
-            {sessionSearchInput}
-          </div>
-          <SessionsHeaderButton
-            label="Filter sessions"
-            active={filtersActive}
-            open={!!filterMenu}
-            hasPopup
-            onClick={onFilterButtonClick}
-          >
-            <ListFilter className="size-3" strokeWidth={1.75} />
-          </SessionsHeaderButton>
-        </div>
-      ) : null}
       <div
         ref={(el) => {
           sessionsLock(el);
           sessionsScrollRef.current = el;
         }}
-        className={`min-h-0 flex-1 overflow-y-auto overscroll-none ${
-          tab === "sessions" ? "" : "hidden"
+        className={`${deckLayout ? "min-w-0" : "min-h-0 flex-1 overflow-y-auto overscroll-none"} ${
+          deckLayout || tab === "sessions" ? "" : "hidden"
         }`}
       >
         {!cwd || cwd === "~" ? (
@@ -771,78 +877,91 @@ function SidebarComponent({
                     ? "No matching sessions"
                     : "No sessions match these filters"}
                 </p>
-              ) : (
+              ) : openItems.length === 0 ? (
                 <SessionsEmpty message="Sessions you start will show up here" />
-              )
+              ) : null
             ) : (
-              <ul className="flex flex-col gap-0.5 p-1.5">
-                {visibleSessions.map((session) => (
-                  <li key={session.id}>
-                    {renamingSessionId === session.id && onRenameSession ? (
-                      <SessionRenameRow
-                        session={session}
-                        isActive={session.id === activeSessionId}
-                        busy={busySessionIds.has(session.id)}
-                        needsApproval={approvalSessionIds.has(session.id)}
-                        onCommit={(title) => {
-                          onRenameSession(session.id, title);
-                          setRenamingSessionId(null);
-                        }}
-                        onCancel={() => setRenamingSessionId(null)}
-                      />
-                    ) : (
-                      <SessionCard
-                        session={session}
-                        isActive={session.id === activeSessionId}
-                        busy={busySessionIds.has(session.id)}
-                        done={unseenFinishedIds.has(session.id)}
-                        needsApproval={approvalSessionIds.has(session.id)}
-                        now={now}
-                        additions={sessionDiffs[session.id]?.additions ?? 0}
-                        deletions={sessionDiffs[session.id]?.deletions ?? 0}
-                        onSelect={onSelectSession}
-                        onContextMenu={
-                          onRenameSession || onArchiveSession || onDeleteSession
-                            ? (e) => onSessionContextMenu(session.id, e)
-                            : undefined
-                        }
-                        onRename={
-                          onRenameSession
-                            ? () => setRenamingSessionId(session.id)
-                            : undefined
-                        }
-                        onDelete={
-                          onDeleteSession
-                            ? () => onDeleteSession(session.id)
-                            : undefined
-                        }
-                      />
-                    )}
-                  </li>
-                ))}
-              </ul>
+              renderSavedRows(visibleSessions)
             )}
           </div>
         )}
       </div>
-      {deckLayout && tab === "changes" ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <SourceControl
-            cwd={gitRoot}
-            enabled={open}
-            textHarness={textHarness}
-            selectedPath={selectedDiffPath}
-            onOpenFile={onOpenDiff ?? onOpenFile}
-          />
+    </>
+  );
+
+  const sidebarContent = (
+    <aside
+      ref={resize.setPaneRef}
+      className="sidebar-glass relative flex h-full min-h-0 shrink-0 flex-col border-r border-content/10"
+    >
+      <div
+        className="flex h-9.75 shrink-0 items-center justify-end pr-1.5"
+        data-tauri-drag-region
+      >
+        <TabVisitNav
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          onGoBack={onGoBack}
+          onGoForward={onGoForward}
+        />
+      </div>
+      {!classicSettings ? (
+        <div
+          role="tablist"
+          aria-label="Workspace"
+          className="flex h-9 shrink-0 items-center gap-px overflow-visible border-y border-content/10 px-2"
+        >
+          {workspaceTabItems}
         </div>
       ) : null}
-      {!deckLayout && tab === "inbox" ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <InboxView cwd={cwd} recents={recents} variant="sidebar" />
-        </div>
-      ) : null}
-      {showSidebarFooter ? (
+      {classicSettings ? (
+        <SettingsNav
+          section={settingsSection}
+          onSelect={(next) => onSelectSettingsSection?.(next)}
+          onClose={() => onCloseSettings?.()}
+        />
+      ) : (
         <>
+          <div
+            className={`flex min-h-0 flex-1 flex-col overflow-hidden ${
+              tab === "files" ? "" : "hidden"
+            }`}
+          >
+            {filesSearchOpen ? (
+              <ProjectSearch
+                cwd={gitRoot}
+                focusToken={searchFocusToken}
+                onOpenFile={onOpenFile}
+                onClose={() => onFilesSearchOpenChange(false)}
+              />
+            ) : cwd && cwd !== "~" ? (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <FileTree
+                  key={gitRoot}
+                  cwd={gitRoot}
+                  active={sidebarVisible && tab === "files"}
+                  onOpenFile={onOpenFile}
+                  onOpenTerminal={onOpenTerminal}
+                  onFileMoved={onFileMoved}
+                  onFileDeleted={onFileDeleted}
+                  onSearch={onOpenFilesSearch}
+                  gitStatuses={gitStatuses}
+                  sourceControlActive={open && tab === "changes"}
+                  onShowSourceControl={onShowSourceControl}
+                />
+              </div>
+            ) : (
+              <p className="px-3 py-2 text-[12px] text-content/50">
+                No project folder
+              </p>
+            )}
+          </div>
+          {sessionContent}
+          {!deckLayout && tab === "inbox" ? (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <InboxView cwd={cwd} recents={recents} variant="sidebar" />
+            </div>
+          ) : null}
           <div className="p-2 pb-1">
             <SidebarUpdate />
           </div>
@@ -857,33 +976,12 @@ function SidebarComponent({
             />
           </div>
         </>
-      ) : null}
-        </>
       )}
-      {sessionMenu ? (
-        <ExplorerMenu
-          x={sessionMenu.x}
-          y={sessionMenu.y}
-          items={sessionMenuItems}
-          ariaLabel="Session actions"
-          onPick={onSessionMenuPick}
-          onClose={() => setSessionMenu(null)}
-        />
-      ) : null}
-      {filterMenu ? (
-        <SessionFiltersMenu
-          x={filterMenu.x}
-          y={filterMenu.y}
-          harnesses={sessionHarnesses}
-          filters={sessionFilters}
-          onChange={onSessionFiltersChange}
-          onClose={() => setFilterMenu(null)}
-        />
-      ) : null}
       <div
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize sidebar"
+        tabIndex={0}
         aria-valuenow={resize.width}
         aria-valuemin={MIN_WIDTH}
         aria-valuemax={MAX_WIDTH}
@@ -892,6 +990,7 @@ function SidebarComponent({
         }`}
         onPointerDown={resize.onPointerDown}
         onDoubleClick={resize.onDoubleClick}
+        onKeyDown={resize.onKeyDown}
       />
     </aside>
   );
@@ -923,6 +1022,13 @@ function SidebarComponent({
           onSelectProject={onSelectProject}
           onOpenProject={onOpenProject}
           onRemoveProject={onRemoveProject}
+          projectSessions={(path) => renderDeckSessions(path)}
+          allSessions={renderDeckSessions()}
+          activeSessionId={activeSessionId}
+          sessionFilters={sessionFilters}
+          sessionHarnesses={sessionHarnesses}
+          onSessionFiltersChange={onSessionFiltersChange}
+          onNewSession={onNew}
           settingsOpen={settingsOpen}
           settingsSection={settingsSection}
           onOpenSettings={onOpenSettings}
@@ -931,38 +1037,35 @@ function SidebarComponent({
         />
       ) : null}
       {sidebarVisible ? sidebarContent : null}
+      {sessionMenu ? (
+        <ExplorerMenu
+          x={sessionMenu.x}
+          y={sessionMenu.y}
+          items={sessionMenuItems}
+          ariaLabel="Session actions"
+          onPick={onSessionMenuPick}
+          onClose={() => {
+            setSessionMenu(null);
+            if (sessionMenuTriggerRef.current?.isConnected)
+              sessionMenuTriggerRef.current.focus();
+          }}
+        />
+      ) : null}
+      {filterMenu ? (
+        <SessionFiltersMenu
+          x={filterMenu.x}
+          y={filterMenu.y}
+          harnesses={sessionHarnesses}
+          filters={sessionFilters}
+          onChange={onSessionFiltersChange}
+          onClose={() => setFilterMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
 export const Sidebar = memo(SidebarComponent);
-
-function WorkspaceTitleActions({
-  onSearch,
-  onNew,
-}: {
-  onSearch?: () => void;
-  onNew?: () => void;
-}) {
-  if (!onSearch && !onNew) return null;
-  return (
-    <div
-      className="flex shrink-0 items-center gap-0.5"
-      data-tauri-drag-region="false"
-    >
-      {onSearch ? (
-        <IconButton label={`Go to File (${MOD}P)`} onClick={onSearch}>
-          <Search className="size-3.5" strokeWidth={1.75} />
-        </IconButton>
-      ) : null}
-      {onNew ? (
-        <IconButton label={`New session (${MOD}T)`} onClick={onNew}>
-          <Plus className="size-3.5" strokeWidth={1.75} />
-        </IconButton>
-      ) : null}
-    </div>
-  );
-}
 
 function SessionsHeaderButton({
   label,
@@ -999,6 +1102,7 @@ function SessionsHeaderButton({
 
 function SessionCard({
   session,
+  compact = false,
   isActive,
   busy,
   done,
@@ -1012,6 +1116,7 @@ function SessionCard({
   onDelete,
 }: {
   session: SessionSummary;
+  compact?: boolean;
   isActive: boolean;
   busy: boolean;
   done: boolean;
@@ -1041,15 +1146,106 @@ function SessionCard({
     }
   };
 
+  if (compact) {
+    const hasChanges = additions > 0 || deletions > 0;
+    const status = needsApproval
+      ? "Needs approval"
+      : busy
+        ? "Working"
+        : done
+          ? "Done"
+          : time;
+    const changeSummary = hasChanges ? `+${additions} -${deletions}` : "";
+    const details = [title, model, gitLabel, status, changeSummary]
+      .filter(Boolean)
+      .join(" · ");
+    return (
+      <div
+        className="sidebar-session-row group relative rounded-lg"
+        data-active={isActive || undefined}
+        data-approval={needsApproval || undefined}
+      >
+        <button
+          type="button"
+          title={details}
+          aria-label={details}
+          aria-current={isActive ? "page" : undefined}
+          onClick={() => onSelect(session.id)}
+          onContextMenu={onContextMenu}
+          onKeyDown={onKeyDown}
+          className="block w-full min-w-0 rounded-lg px-2.5 py-2 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+        >
+          <span
+            className={`flex min-w-0 items-center gap-1.5 ${onContextMenu ? "pr-6" : ""}`}
+          >
+            <HarnessIcon
+              harness={session.harness}
+              className="size-3.5 shrink-0"
+            />
+            <span className="min-w-0 flex-1 truncate text-[12px] font-medium leading-5 text-content">
+              {title}
+            </span>
+            <span
+              title={status}
+              className={`flex shrink-0 items-center gap-1 text-[10px] tabular-nums ${needsApproval ? "sidebar-session-approval" : busy ? "sidebar-session-working" : done ? "sidebar-session-done" : "sidebar-session-meta"}`}
+            >
+              {needsApproval ? (
+                <>
+                  <CircleAlert className="size-3" />
+                  <span>Approval</span>
+                </>
+              ) : busy ? (
+                <>
+                  <TerminalSpinner className="w-3 text-center text-[10px]" />
+                  <span>Working</span>
+                </>
+              ) : done ? (
+                <>
+                  <Check className="size-3" />
+                  <span>Done</span>
+                </>
+              ) : (
+                time
+              )}
+            </span>
+          </span>
+          <span className="mt-1 flex min-w-0 items-center gap-2">
+            <span className="sidebar-session-meta flex min-w-0 flex-1 items-center gap-1 text-[11px]">
+              {gitLabel ? (
+                <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
+              ) : null}
+              <span className="min-w-0 truncate">
+                {[model, gitLabel].filter(Boolean).join(" · ")}
+              </span>
+            </span>
+            <DiffStat additions={additions} deletions={deletions} compact />
+          </span>
+        </button>
+        {onContextMenu ? (
+          <button
+            type="button"
+            aria-label={`Options for ${title}`}
+            title="Session options"
+            aria-haspopup="menu"
+            onClick={onContextMenu}
+            className="absolute right-1 top-1 grid size-6 place-items-center rounded-md text-content/55 opacity-0 hover:bg-content/10 hover:text-content group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <MoreHorizontal className="size-3.5" strokeWidth={1.75} />
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <button
       type="button"
-      title={title}
+      title={[title, model, gitLabel].filter(Boolean).join(" · ")}
       aria-current={isActive ? "true" : undefined}
       onClick={() => onSelect(session.id)}
       onContextMenu={onContextMenu}
       onKeyDown={onKeyDown}
-      className={`border flex w-full flex-col rounded-md px-2.5 py-2 text-left ${
+      className={`border flex w-full min-w-0 flex-col rounded-md px-2.5 py-2 text-left focus-visible:outline-2 focus-visible:outline-accent ${
         needsApproval
           ? "bg-content/20 text-content border-content/30 border-dashed"
           : isActive
@@ -1063,8 +1259,10 @@ function SessionCard({
             harness={session.harness}
             className="size-3.5 shrink-0"
           />
-          <span className="min-w-0 truncate text-[11px] text-content/50">
-            {model}
+          <span
+            className={`min-w-0 truncate ${compact ? "text-[12px] font-medium text-content" : "text-[11px] text-content/50"}`}
+          >
+            {compact ? title : model}
           </span>
         </span>
         <span
@@ -1075,7 +1273,9 @@ function SessionCard({
                 ? "text-accent"
                 : done
                   ? "text-emerald-400"
-                  : "text-content/45"
+                  : compact
+                    ? "text-content/60"
+                    : "text-content/45"
           }`}
         >
           {needsApproval ? (
@@ -1098,24 +1298,34 @@ function SessionCard({
           )}
         </span>
       </span>
-      <span className="mt-1 line-clamp-1 text-[13px] font-semibold leading-snug text-content">
-        {title}
-      </span>
+      {!compact ? (
+        <span className="mt-1 line-clamp-1 text-[13px] font-semibold leading-snug text-content">
+          {title}
+        </span>
+      ) : null}
       <span className="mt-1 flex items-center gap-2">
         {gitLabel ? (
-          <span className="flex min-w-0 flex-1 items-center gap-1 text-[11px] text-content/45">
+          <span
+            className={`flex min-w-0 flex-1 items-center gap-1 text-[11px] ${compact ? "text-content/60" : "text-content/45"}`}
+          >
             <GitBranch className="size-3 shrink-0" strokeWidth={1.75} />
-            <span className="min-w-0 truncate">{gitLabel}</span>
+            <span className="min-w-0 truncate">
+              {compact ? `${model} · ${gitLabel}` : gitLabel}
+            </span>
           </span>
         ) : (
-          <span className="min-w-0 flex-1" />
+          <span className="min-w-0 flex-1 truncate text-[11px] text-content/60">
+            {compact ? model : null}
+          </span>
         )}
         <span className="flex shrink-0 items-center gap-1.5">
           <DiffStat additions={additions} deletions={deletions} />
-          <HarnessIcon
-            harness={session.harness}
-            className="size-3.5 shrink-0"
-          />
+          {!compact ? (
+            <HarnessIcon
+              harness={session.harness}
+              className="size-3.5 shrink-0"
+            />
+          ) : null}
         </span>
       </span>
     </button>
@@ -1204,9 +1414,11 @@ function SessionRenameRow({
 function DiffStat({
   additions,
   deletions,
+  compact = false,
 }: {
   additions: number;
   deletions: number;
+  compact?: boolean;
 }) {
   if (additions <= 0 && deletions <= 0) return null;
 
@@ -1220,13 +1432,13 @@ function DiffStat({
   return (
     <span
       title={`${label} uncommitted`}
-      className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] font-semibold tabular-nums"
+      className={`sidebar-diff flex shrink-0 items-center gap-1 tabular-nums ${compact ? "text-[10px] font-medium" : "font-mono text-[11px] font-semibold"}`}
     >
       {additions > 0 ? (
-        <span className="text-emerald-400">+{additions}</span>
+        <span className="sidebar-diff-add">+{additions}</span>
       ) : null}
       {deletions > 0 ? (
-        <span className="text-red-400">-{deletions}</span>
+        <span className="sidebar-diff-delete">-{deletions}</span>
       ) : null}
     </span>
   );

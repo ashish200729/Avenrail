@@ -34,7 +34,7 @@ export const SETTINGS_SECTIONS: {
     id: "providers",
     label: "Providers",
     description:
-      "Agent CLIs MonoCode can drive, and the model new sessions start with.",
+      "Agent CLIs Avenrail can drive, and the model new sessions start with.",
   },
   {
     id: "archive",

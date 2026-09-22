@@ -4,6 +4,7 @@ import {
   GitCompare,
   Inbox,
   PanelLeft,
+  PanelRight,
   Plus,
   Search,
   Settings,
@@ -95,6 +96,7 @@ export type Tab = {
 };
 
 type Props = {
+  hidden?: boolean;
   tabs: Tab[];
   activeId: string;
   cwd: string;
@@ -102,6 +104,9 @@ type Props = {
   sidebarOpen: boolean;
   deckLayout?: boolean;
   projectRailOpen?: boolean;
+  workspacePanelOpen?: boolean;
+  hideWindowControls?: boolean;
+  onToggleWorkspacePanel?: () => void;
   sourceControlActive?: boolean;
   onToggleSidebar: () => void;
   onShowSourceControl?: () => void;
@@ -331,11 +336,11 @@ function TitleTabItem({
         sortable.setItemRef(tab.id, el);
         itemRef?.(el);
       }}
-      className={`group @container relative flex h-full touch-none self-stretch ${
-        deckLayout ? "min-w-56 shrink-0 grow basis-56" : "w-56 min-w-28 shrink"
+      className={`group @container relative flex touch-none ${
+        deckLayout ? "h-8 min-w-0 flex-1 self-center rounded-lg" : "h-full w-56 min-w-28 shrink self-stretch"
       } ${
-        showLeftBorder ? "border-l border-content/10" : ""
-      } ${showRightBorder ? "border-r border-content/10" : ""} ${
+        !deckLayout && showLeftBorder ? "border-l border-content/10" : ""
+      } ${!deckLayout && showRightBorder ? "border-r border-content/10" : ""} ${
         dragging ? "opacity-40" : ""
       } ${canDrag ? "cursor-grab active:cursor-grabbing" : ""}`}
       data-tauri-drag-region="false"
@@ -368,6 +373,7 @@ function TitleTabItem({
         type="button"
         title={tooltip}
         aria-label={tooltip}
+        aria-current={active ? "page" : undefined}
         data-tauri-drag-region="false"
         onClick={() => {
           if (sortable.consumeClick()) return;
@@ -375,7 +381,7 @@ function TitleTabItem({
         }}
         className={`relative flex h-full min-w-0 flex-1 items-center gap-1.5 px-2.5 text-left ${
           closable ? "pr-7" : "pr-2.5"
-        } ${canDrag ? "cursor-grab active:cursor-grabbing" : ""} ${
+        } ${deckLayout ? "rounded-lg" : ""} focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent ${canDrag ? "cursor-grab active:cursor-grabbing" : ""} ${
           active
             ? "bg-content/10 text-content"
             : "text-content/50 hover:bg-content/5 hover:text-content"
@@ -435,7 +441,7 @@ function TitleTabItem({
             e.stopPropagation();
             onClose(tab.id);
           }}
-          className="absolute right-1 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded text-content/50 opacity-0 hover:bg-content/10 hover:text-content group-hover:opacity-100"
+          className="absolute right-1 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded text-content/50 opacity-0 hover:bg-content/10 hover:text-content group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:outline-2 focus-visible:outline-accent"
         >
           <X className="size-3" strokeWidth={1.75} />
         </button>
@@ -750,20 +756,21 @@ export function IconButton({
       type="button"
       title={label}
       aria-label={label}
-      aria-pressed={active || accent}
+      aria-pressed={active}
+      disabled={disabled}
       aria-disabled={disabled}
       data-tauri-drag-region="false"
       onClick={() => {
         if (disabled) return;
         onClick?.();
       }}
-      className={`grid size-6.5 place-items-center rounded-md ${
+      className={`chrome-icon-button grid shrink-0 place-items-center rounded-lg ${
         disabled
           ? "text-content/25"
           : accent
             ? "text-accent hover:bg-content/10"
             : active
-              ? "text-content hover:bg-content/10"
+              ? "bg-content/8 text-content hover:bg-content/12"
               : "text-content/50 hover:bg-content/10 hover:text-content"
       }`}
     >
@@ -819,6 +826,7 @@ export function TabVisitNav({
 }
 
 function TitleBarComponent({
+  hidden = false,
   tabs,
   activeId,
   cwd,
@@ -826,6 +834,9 @@ function TitleBarComponent({
   sidebarOpen,
   deckLayout = false,
   projectRailOpen = true,
+  workspacePanelOpen = false,
+  hideWindowControls = false,
+  onToggleWorkspacePanel,
   sourceControlActive = false,
   onToggleSidebar,
   onShowSourceControl,
@@ -1148,12 +1159,12 @@ function TitleBarComponent({
       : "";
     const project = cwd ? basename(cwd) : "";
     if (activeName && project && activeName !== project) {
-      return `${activeName} — ${project} — MonoCode`;
+      return `${activeName} — ${project} — Avenrail`;
     }
     if (project) {
-      return `${project} — MonoCode`;
+      return `${project} — Avenrail`;
     }
-    return "MonoCode";
+    return "Avenrail";
   }, [activeTab, cwd]);
 
   useEffect(() => {
@@ -1181,16 +1192,15 @@ function TitleBarComponent({
     currentProjectKey,
   );
   const showCurrentProject = looksLikeProject(cwd);
-  // Until a project is picked, deck mode hides the rail and the sidebar, so
-  // nothing project-scoped is actionable and the window controls need room.
+  // A projectless window has no workspace tools; navigation can still be open.
   const projectless = deckLayout && !showCurrentProject;
-  // With the rail closed the sidebar header carries no actions, so the project
-  // button and its shortcuts ride in the title bar's single row.
+  // With navigation closed, the project picker and shortcuts stay in the title bar.
   const showProjectButton = railClosed && Boolean(onSelectProject);
+  const showWorkspaceShortcuts = !deckLayout || !workspacePanelOpen;
   const trailingControls = (
     <div className="flex h-full shrink-0 items-stretch">
-      <div className="flex items-center gap-0.5 px-2">
-        {!deckLayout ? (
+      <div className={`items-center gap-0.5 px-2 ${showWorkspaceShortcuts ? "flex" : "hidden"}`}>
+        {!deckLayout || !projectless ? (
           <ProjectDiffStats
             cwd={gitCwd || cwd}
             active={sourceControlActive}
@@ -1232,18 +1242,31 @@ function TitleBarComponent({
             <Terminal className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}
-        {deckLayout &&
-        !projectRailOpen &&
-        !showCurrentProject &&
-        onOpenSettings ? (
+        {deckLayout && !projectless && !workspacePanelOpen && onToggleWorkspacePanel ? (
+          <button
+            id="workspace-panel-toggle"
+            type="button"
+            title={workspacePanelOpen ? "Hide workspace panel" : "Show workspace panel"}
+            aria-label={workspacePanelOpen ? "Hide workspace panel" : "Show workspace panel"}
+            aria-expanded={workspacePanelOpen}
+            data-tauri-drag-region="false"
+            onClick={onToggleWorkspacePanel}
+            className={`grid size-7 place-items-center rounded-md text-content/60 hover:bg-content/10 hover:text-content focus-visible:outline-2 focus-visible:outline-accent ${workspacePanelOpen ? "bg-content/10 text-content" : ""}`}
+          >
+            <PanelRight className="size-3.5" strokeWidth={1.75} />
+          </button>
+        ) : null}
+        {deckLayout && railClosed && onOpenSettings ? (
           <IconButton label={`Settings (${MOD},)`} onClick={onOpenSettings}>
             <Settings className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}
       </div>
-      {!IS_MAC ? <WindowControls /> : null}
+      {!IS_MAC && !hideWindowControls ? <WindowControls /> : null}
     </div>
   );
+
+  if (hidden) return null;
 
   return (
     <header
@@ -1251,12 +1274,11 @@ function TitleBarComponent({
       data-tauri-drag-region
       onDoubleClick={onTitleBarDoubleClick}
     >
-      {/* Both the rail and the sidebar step aside without a project, so the
-          title bar takes over the traffic lights and the rail toggle. */}
+      {/* Collapsed navigation leaves room for traffic lights and a reopen button. */}
       {(projectless && railClosed) || (!sidebarOpen && IS_MAC) ? (
         <div className="w-[78px] shrink-0" data-tauri-drag-region />
       ) : null}
-      {projectless && railClosed ? (
+      {railClosed ? (
         <div className="flex shrink-0 items-center px-1.5">
           <IconButton
             label={`Toggle Sidebar (${MOD}B)`}
@@ -1328,9 +1350,8 @@ function TitleBarComponent({
         }`}
       >
         {/*
-          Strip sizes to its tabs (w-56 each), sits left; + follows.
-          When crowded, tabs shrink to min-w-28 then the strip scrolls.
-          Deck mode grows tabs evenly; once each hits w-56 the strip scrolls.
+          Session tabs share available header space, then scroll when their
+          readable minimum is reached. Classic keeps its existing tab sizing.
         */}
         <div
           className={`relative h-full min-w-0 overflow-hidden ${
@@ -1353,7 +1374,7 @@ function TitleBarComponent({
           ) : null}
           <div
             ref={setTabStripRef}
-            className="scrollbar-none flex h-full min-w-0 items-stretch overflow-x-auto overflow-y-hidden overscroll-none"
+            className={`scrollbar-none flex h-full min-w-0 items-stretch overflow-x-auto overflow-y-hidden overscroll-none ${deckLayout ? "gap-1 px-1.5" : ""}`}
           >
             {segments.map((segment, segmentIndex) => {
               const showSegmentStart =
@@ -1425,7 +1446,7 @@ function TitleBarComponent({
                 <div
                   key={tab.id}
                   ref={(el) => segmentDrag.setSegmentRef(segmentIndex, el)}
-                  className={`relative flex h-full shrink-0 items-stretch ${
+                  className={`relative flex h-full items-stretch ${deckLayout ? active ? "min-w-40 max-w-64 flex-[1.5] basis-52" : "min-w-28 max-w-56 flex-1 basis-32" : "shrink-0"} ${
                     draggingSegment ? "opacity-40" : ""
                   }`}
                   data-tauri-drag-region="false"

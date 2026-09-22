@@ -1,18 +1,20 @@
 <p align="center">
-  <img src="public/monocode.png" alt="MonoCode" width="88" />
+  <img src="public/avenrail.svg" alt="Avenrail" width="88" />
 </p>
 
-<h1 align="center">MonoCode</h1>
+<h1 align="center">Avenrail</h1>
 
 <p align="center">
   <strong>A desktop UI for your coding agents.</strong>
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.jpg" alt="MonoCode with sessions, agent chat, diffs, terminal, and editor" width="920" />
+  <img src="docs/avenrail-workspace.png" alt="Avenrail workspace with projects, sessions, and the new-session composer" width="920" />
 </p>
 
-Works with your subscriptions on Claude Code, Codex, Cursor, OpenCode, Pi, omp, and fx. If they’re installed and logged in, MonoCode can run them. Tabs are sessions. The composer is the input. MonoCode does not sell tokens.
+*Workspace preview using illustrative local demo data.*
+
+Works with your subscriptions on Claude Code, Codex, Cursor, OpenCode, Pi, omp, and fx. If they’re installed and logged in, Avenrail can run them. Projects organize your sessions. Chat, review, files, and terminals share one workspace. Avenrail does not sell tokens.
 
 ## Install
 
@@ -26,7 +28,13 @@ Works with your subscriptions on Claude Code, Codex, Cursor, OpenCode, Pi, omp, 
 > - [omp](https://omp.sh) - `curl -fsSL https://omp.sh/install | sh`
 > - [fx](https://fx.sh) - `curl -fsSL https://fx.sh/setup.sh | bash` then `fx login`
 
-macOS (Apple Silicon): download [MonoCode.dmg](https://dl.usemono.dev/MonoCode.dmg), open it, drag MonoCode to Applications.
+For published builds, check the [project releases](https://github.com/ashish200729/Avenrail/releases). Newly built macOS bundles are named `Avenrail.app` and `Avenrail_<version>_aarch64.dmg`. Older published releases may still carry the previous name. To try the rebrand before it is published, build from source below.
+
+## Upgrading from MonoCode
+
+Avenrail keeps existing sessions, settings, and credentials in place. Compatibility-sensitive installation identifiers retain their old names; see [rebrand compatibility](docs/rebrand-compatibility.md). The codebase and newly built app use Avenrail.
+
+Avenrail originated from [MonoCode](https://github.com/hardbeat920/monocode). Its Git history is preserved, and the upstream repository remains available for selectively bringing in compatible fixes and improvements.
 
 ## Some notes
 

@@ -1416,7 +1416,7 @@ fn git_pr_create_for(root: &Path, input: &GitPrCreateInput) -> Result<String, St
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let body_path = std::env::temp_dir().join(format!("monocode-pr-{stamp}.md"));
+    let body_path = std::env::temp_dir().join(format!("avenrail-pr-{stamp}.md"));
     std::fs::write(&body_path, input.body.trim()).map_err(|e| e.to_string())?;
     let result = gh_checked(
         root,
@@ -2395,7 +2395,7 @@ fn write_attachment_sync(name: &str, data: &str) -> Result<String, String> {
             MAX_ATTACHMENT_EMBED_BYTES / 1024 / 1024
         ));
     }
-    let dir = std::env::temp_dir().join("monocode-attachments");
+    let dir = std::env::temp_dir().join("avenrail-attachments");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2503,7 +2503,7 @@ fn write_text_file_sync(path: &str, content: &str) -> Result<(), String> {
     let mut temporary = None;
     for attempt in 0..100 {
         let candidate = parent.join(format!(
-            ".{name}.monocode-{}-{stamp}-{attempt}.tmp",
+            ".{name}.avenrail-{}-{stamp}-{attempt}.tmp",
             std::process::id()
         ));
         match std::fs::OpenOptions::new()
@@ -2630,7 +2630,7 @@ fn rename_path_sync(path: &str, name: &str) -> Result<String, String> {
             .unwrap_or_default()
             .as_nanos();
         let tmp = parent.join(format!(
-            ".{}.monocode-rename-{stamp}",
+            ".{}.avenrail-rename-{stamp}",
             file_label(&from, "tmp")
         ));
         std::fs::rename(&from, &tmp).map_err(|e| e.to_string())?;
@@ -2818,7 +2818,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let dir =
-            std::env::temp_dir().join(format!("monocode-editor-{}-{stamp}", std::process::id()));
+            std::env::temp_dir().join(format!("avenrail-editor-{}-{stamp}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("example.rs");
         std::fs::write(&path, "fn old() {}\n").unwrap();
@@ -2877,7 +2877,7 @@ mod tests {
                 .as_nanos();
             let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
             let dir = std::env::temp_dir().join(format!(
-                "monocode-{label}-{}-{stamp}-{seq}",
+                "avenrail-{label}-{}-{stamp}-{seq}",
                 std::process::id()
             ));
             match std::fs::create_dir(&dir) {
@@ -3055,8 +3055,8 @@ mod tests {
                 return false;
             }
         }
-        git(dir, &["config", "user.name", "MonoCode"])
-            && git(dir, &["config", "user.email", "monocode@test"])
+        git(dir, &["config", "user.name", "Avenrail"])
+            && git(dir, &["config", "user.email", "avenrail@test"])
             && git(dir, &["config", "commit.gpgsign", "false"])
     }
 
@@ -3093,18 +3093,18 @@ mod tests {
         Command::new("git")
             .args([
                 "-c",
-                "user.name=MonoCode",
+                "user.name=Avenrail",
                 "-c",
-                "user.email=monocode@test",
+                "user.email=avenrail@test",
                 "-c",
                 "commit.gpgsign=false",
             ])
             .args(args)
             .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "MonoCode")
-            .env("GIT_AUTHOR_EMAIL", "monocode@test")
-            .env("GIT_COMMITTER_NAME", "MonoCode")
-            .env("GIT_COMMITTER_EMAIL", "monocode@test")
+            .env("GIT_AUTHOR_NAME", "Avenrail")
+            .env("GIT_AUTHOR_EMAIL", "avenrail@test")
+            .env("GIT_COMMITTER_NAME", "Avenrail")
+            .env("GIT_COMMITTER_EMAIL", "avenrail@test")
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
@@ -3495,8 +3495,8 @@ mod tests {
                 .status()
                 .map(|status| !status.success())
                 .unwrap_or(true)
-            || !git(&b.0, &["config", "user.name", "MonoCode"])
-            || !git(&b.0, &["config", "user.email", "monocode@test"])
+            || !git(&b.0, &["config", "user.name", "Avenrail"])
+            || !git(&b.0, &["config", "user.email", "avenrail@test"])
             || !git(&b.0, &["config", "commit.gpgsign", "false"])
         {
             return;

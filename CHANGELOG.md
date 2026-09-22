@@ -9,7 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Claude Code hooks now run. MonoCode used to launch the CLI with `disableAllHooks`, so every hook in your `settings.json` — command rewrites, blocks, notifications — was silently skipped. Settings → General has a "Claude Code hooks" toggle (on by default) to turn them back off if one misbehaves. MonoCode's own helper spawns, like title generation, stay hook-free.
+- Rebranded the desktop app as Avenrail, with a new app icon, launch screen, About identity, native menus, dialogs, provider client names, and release artifacts. Existing sessions, settings, credentials, and update identity stay compatible.
+
+- Claude Code hooks now run. MonoCode used to launch the CLI with `disableAllHooks`, so every hook in your `settings.json` — command rewrites, blocks, notifications — was silently skipped. Settings → General has a "Claude Code hooks" toggle (on by default) to turn them back off if one misbehaves. Avenrail's own helper spawns, like title generation, stay hook-free.
+
+### Fixed
+
+- Codex, Claude Code, OpenCode, and Pi CLIs installed through nvm stay detected even when the interactive login shell that supplies PATH does not answer (a slow `.zshrc`, or nvm lazy-loaded until first use). `~/.nvm/versions/*/bin` is now scanned directly, newest Node version first, as a last-resort fallback.
 
 ### Changed
 
@@ -303,7 +309,7 @@ First public release. macOS (Apple Silicon) only.
 - Updater endpoint and minisign public key are injected at release time rather than committed, so forks do not inherit the maintainer's update channel.
 - macOS release builds sign with `APPLE_SIGNING_IDENTITY` via a config overlay; the committed default remains ad-hoc `-` for community builds.
 
-[Unreleased]: https://github.com/hardbeat920/monocode/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/ashish200729/Avenrail/compare/v0.1.18...HEAD
 [0.1.18]: https://github.com/hardbeat920/monocode/compare/v0.1.17...v0.1.18
 [0.1.17]: https://github.com/hardbeat920/monocode/compare/v0.1.16...v0.1.17
 [0.1.16]: https://github.com/hardbeat920/monocode/compare/v0.1.15...v0.1.16

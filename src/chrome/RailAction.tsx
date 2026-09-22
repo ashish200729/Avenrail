@@ -1,6 +1,8 @@
 import type { LucideIcon } from "lucide-react";
 
 type Props = {
+  id?: string;
+  expanded?: boolean;
   label: string;
   icon: LucideIcon;
   onClick?: () => void;
@@ -10,9 +12,13 @@ type Props = {
   shortcut?: string;
   ariaLabel?: string;
   isNavButton?: boolean;
+  iconOnly?: boolean;
+  prominent?: boolean;
 };
 
 export function RailAction({
+  id,
+  expanded,
   label,
   icon: Icon,
   onClick,
@@ -22,20 +28,28 @@ export function RailAction({
   shortcut,
   ariaLabel,
   isNavButton = false,
+  iconOnly = false,
+  prominent = false,
 }: Props) {
   return (
     <button
+      id={id}
       type="button"
       onClick={onClick}
       disabled={!onClick}
+      title={iconOnly ? (ariaLabel ?? label) : undefined}
       aria-label={ariaLabel ?? label}
-      className={`relative flex w-full items-center gap-2 rounded-md px-2 py-2 text-left ${
+      aria-expanded={expanded}
+      aria-current={isNavButton && active ? "page" : undefined}
+      className={`relative ${iconOnly ? "grid size-9 shrink-0 place-items-center" : "flex min-w-0 w-full items-center gap-2 px-2 py-2 text-left"} ${prominent || iconOnly ? "rounded-lg" : "rounded-md"} ${
         active
           ? "bg-content/10 text-content"
-          : isNavButton
-            ? "text-content/50 hover:bg-content/10 hover:text-content"
-            : "text-content/50 hover:bg-content/10 hover:text-content"
-      } disabled:cursor-default disabled:opacity-40`}
+          : prominent
+            ? "bg-content/5 text-content hover:bg-content/10"
+            : isNavButton
+              ? "text-content/50 hover:bg-content/10 hover:text-content"
+              : "text-content/50 hover:bg-content/10 hover:text-content"
+      } focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default disabled:opacity-40`}
     >
       {badge != null ? (
         <span
@@ -48,13 +62,16 @@ export function RailAction({
       <Icon
         className={`size-4 shrink-0 opacity-70 ${badge != null ? "ml-4" : ""}`}
         strokeWidth={1.75}
+        aria-hidden
       />
-      <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">
-        {label}
-      </span>
+      {!iconOnly ? (
+        <span className="min-w-0 flex-1 truncate text-sm font-medium leading-tight">
+          {label}
+        </span>
+      ) : null}
       {dot ? (
         <span aria-hidden className="size-2 shrink-0 rounded-full bg-accent" />
-      ) : shortcut ? (
+      ) : shortcut && !iconOnly ? (
         <span aria-hidden className="shrink-0 text-[11px] text-content/40">
           {shortcut}
         </span>

@@ -1,0 +1,498 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-31T16:38:21.716244+00:00",
+  "title": "Design System: Avenrail",
+  "extensions": {
+    "colorMeta": {
+      "background-base": {
+        "role": "neutral",
+        "displayName": "Theme Background",
+        "canonical": "hsl(var(--theme-hue) var(--theme-saturation) var(--background-lightness))",
+        "tonalRamp": [
+          "hsl(var(--theme-hue) var(--theme-saturation) 15%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 25%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 35%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 45%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 55%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 65%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 80%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 95%)"
+        ]
+      },
+      "content": {
+        "role": "neutral",
+        "displayName": "Theme Content",
+        "canonical": "hsl(var(--theme-hue) var(--theme-saturation) var(--content-lightness))",
+        "tonalRamp": [
+          "hsl(var(--theme-hue) var(--theme-saturation) 15%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 25%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 35%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 45%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 55%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 65%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 80%)",
+          "hsl(var(--theme-hue) var(--theme-saturation) 95%)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Signal Blue",
+        "canonical": "hsl(211 92% 62%)",
+        "tonalRamp": [
+          "hsl(211 92% 15%)",
+          "hsl(211 92% 25%)",
+          "hsl(211 92% 35%)",
+          "hsl(211 92% 45%)",
+          "hsl(211 92% 55%)",
+          "hsl(211 92% 62%)",
+          "hsl(211 92% 78%)",
+          "hsl(211 92% 95%)"
+        ]
+      },
+      "link": {
+        "role": "primary",
+        "displayName": "Link Blue",
+        "canonical": "#7dd3fc",
+        "tonalRamp": [
+          "hsl(199 93% 15%)",
+          "hsl(199 93% 25%)",
+          "hsl(199 93% 35%)",
+          "hsl(199 93% 45%)",
+          "hsl(199 93% 55%)",
+          "hsl(199 93% 65%)",
+          "hsl(199 93% 80%)",
+          "hsl(199 93% 95%)"
+        ]
+      },
+      "content-faint": {
+        "role": "neutral",
+        "displayName": "Faint Content",
+        "canonical": "color-mix(in srgb, var(--color-content) 35%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 10%, transparent)",
+          "color-mix(in srgb, var(--color-content) 20%, transparent)",
+          "color-mix(in srgb, var(--color-content) 30%, transparent)",
+          "color-mix(in srgb, var(--color-content) 35%, transparent)",
+          "color-mix(in srgb, var(--color-content) 45%, transparent)",
+          "color-mix(in srgb, var(--color-content) 55%, transparent)",
+          "color-mix(in srgb, var(--color-content) 70%, transparent)",
+          "color-mix(in srgb, var(--color-content) 90%, transparent)"
+        ]
+      },
+      "content-muted": {
+        "role": "neutral",
+        "displayName": "Muted Content",
+        "canonical": "color-mix(in srgb, var(--color-content) 45%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 10%, transparent)",
+          "color-mix(in srgb, var(--color-content) 25%, transparent)",
+          "color-mix(in srgb, var(--color-content) 35%, transparent)",
+          "color-mix(in srgb, var(--color-content) 45%, transparent)",
+          "color-mix(in srgb, var(--color-content) 55%, transparent)",
+          "color-mix(in srgb, var(--color-content) 65%, transparent)",
+          "color-mix(in srgb, var(--color-content) 80%, transparent)",
+          "color-mix(in srgb, var(--color-content) 95%, transparent)"
+        ]
+      },
+      "content-soft": {
+        "role": "neutral",
+        "displayName": "Soft Content",
+        "canonical": "color-mix(in srgb, var(--color-content) 65%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 20%, transparent)",
+          "color-mix(in srgb, var(--color-content) 35%, transparent)",
+          "color-mix(in srgb, var(--color-content) 50%, transparent)",
+          "color-mix(in srgb, var(--color-content) 65%, transparent)",
+          "color-mix(in srgb, var(--color-content) 75%, transparent)",
+          "color-mix(in srgb, var(--color-content) 85%, transparent)",
+          "color-mix(in srgb, var(--color-content) 92%, transparent)",
+          "var(--color-content)"
+        ]
+      },
+      "content-strong-muted": {
+        "role": "neutral",
+        "displayName": "Strong Muted Content",
+        "canonical": "color-mix(in srgb, var(--color-content) 78%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 25%, transparent)",
+          "color-mix(in srgb, var(--color-content) 40%, transparent)",
+          "color-mix(in srgb, var(--color-content) 55%, transparent)",
+          "color-mix(in srgb, var(--color-content) 70%, transparent)",
+          "color-mix(in srgb, var(--color-content) 78%, transparent)",
+          "color-mix(in srgb, var(--color-content) 86%, transparent)",
+          "color-mix(in srgb, var(--color-content) 94%, transparent)",
+          "var(--color-content)"
+        ]
+      },
+      "surface-subtle": {
+        "role": "neutral",
+        "displayName": "Subtle Surface",
+        "canonical": "color-mix(in srgb, var(--color-content) 3%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 3%, transparent)",
+          "color-mix(in srgb, var(--color-content) 5%, transparent)",
+          "color-mix(in srgb, var(--color-content) 8%, transparent)",
+          "color-mix(in srgb, var(--color-content) 10%, transparent)",
+          "color-mix(in srgb, var(--color-content) 14%, transparent)",
+          "color-mix(in srgb, var(--color-content) 18%, transparent)",
+          "color-mix(in srgb, var(--color-content) 24%, transparent)",
+          "color-mix(in srgb, var(--color-content) 32%, transparent)"
+        ]
+      },
+      "surface-hover": {
+        "role": "neutral",
+        "displayName": "Hover Surface",
+        "canonical": "color-mix(in srgb, var(--color-content) 4%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 4%, transparent)",
+          "color-mix(in srgb, var(--color-content) 6%, transparent)",
+          "color-mix(in srgb, var(--color-content) 9%, transparent)",
+          "color-mix(in srgb, var(--color-content) 12%, transparent)",
+          "color-mix(in srgb, var(--color-content) 16%, transparent)",
+          "color-mix(in srgb, var(--color-content) 22%, transparent)",
+          "color-mix(in srgb, var(--color-content) 30%, transparent)",
+          "color-mix(in srgb, var(--color-content) 40%, transparent)"
+        ]
+      },
+      "surface-control": {
+        "role": "neutral",
+        "displayName": "Control Surface",
+        "canonical": "color-mix(in srgb, var(--color-content) 5%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 5%, transparent)",
+          "color-mix(in srgb, var(--color-content) 8%, transparent)",
+          "color-mix(in srgb, var(--color-content) 12%, transparent)",
+          "color-mix(in srgb, var(--color-content) 16%, transparent)",
+          "color-mix(in srgb, var(--color-content) 22%, transparent)",
+          "color-mix(in srgb, var(--color-content) 30%, transparent)",
+          "color-mix(in srgb, var(--color-content) 40%, transparent)",
+          "color-mix(in srgb, var(--color-content) 55%, transparent)"
+        ]
+      },
+      "surface-active": {
+        "role": "neutral",
+        "displayName": "Active Surface",
+        "canonical": "color-mix(in srgb, var(--color-content) 9%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 9%, transparent)",
+          "color-mix(in srgb, var(--color-content) 12%, transparent)",
+          "color-mix(in srgb, var(--color-content) 16%, transparent)",
+          "color-mix(in srgb, var(--color-content) 22%, transparent)",
+          "color-mix(in srgb, var(--color-content) 30%, transparent)",
+          "color-mix(in srgb, var(--color-content) 40%, transparent)",
+          "color-mix(in srgb, var(--color-content) 55%, transparent)",
+          "color-mix(in srgb, var(--color-content) 70%, transparent)"
+        ]
+      },
+      "surface-menu": {
+        "role": "neutral",
+        "displayName": "Menu Surface",
+        "canonical": "color-mix(in srgb, var(--color-content) 10%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 10%, transparent)",
+          "color-mix(in srgb, var(--color-content) 14%, transparent)",
+          "color-mix(in srgb, var(--color-content) 18%, transparent)",
+          "color-mix(in srgb, var(--color-content) 24%, transparent)",
+          "color-mix(in srgb, var(--color-content) 32%, transparent)",
+          "color-mix(in srgb, var(--color-content) 42%, transparent)",
+          "color-mix(in srgb, var(--color-content) 55%, transparent)",
+          "color-mix(in srgb, var(--color-content) 70%, transparent)"
+        ]
+      },
+      "border-subtle": {
+        "role": "neutral",
+        "displayName": "Quiet Border",
+        "canonical": "color-mix(in srgb, var(--color-content) 10%, transparent)",
+        "tonalRamp": [
+          "color-mix(in srgb, var(--color-content) 5%, transparent)",
+          "color-mix(in srgb, var(--color-content) 8%, transparent)",
+          "color-mix(in srgb, var(--color-content) 10%, transparent)",
+          "color-mix(in srgb, var(--color-content) 14%, transparent)",
+          "color-mix(in srgb, var(--color-content) 18%, transparent)",
+          "color-mix(in srgb, var(--color-content) 24%, transparent)",
+          "color-mix(in srgb, var(--color-content) 32%, transparent)",
+          "color-mix(in srgb, var(--color-content) 45%, transparent)"
+        ]
+      },
+      "skill": {
+        "role": "semantic",
+        "displayName": "Skill Gold",
+        "canonical": "#e8c547",
+        "tonalRamp": [
+          "hsl(49 79% 15%)",
+          "hsl(49 79% 25%)",
+          "hsl(49 79% 35%)",
+          "hsl(49 79% 45%)",
+          "hsl(49 79% 55%)",
+          "hsl(49 79% 65%)",
+          "hsl(49 79% 80%)",
+          "hsl(49 79% 95%)"
+        ]
+      },
+      "mention": {
+        "role": "semantic",
+        "displayName": "Mention Cyan",
+        "canonical": "#38bdf8",
+        "tonalRamp": [
+          "hsl(199 93% 15%)",
+          "hsl(199 93% 25%)",
+          "hsl(199 93% 35%)",
+          "hsl(199 93% 45%)",
+          "hsl(199 93% 55%)",
+          "hsl(199 93% 65%)",
+          "hsl(199 93% 80%)",
+          "hsl(199 93% 95%)"
+        ]
+      },
+      "status-add": {
+        "role": "semantic",
+        "displayName": "Diff Green",
+        "canonical": "#34d399",
+        "tonalRamp": [
+          "hsl(158 64% 15%)",
+          "hsl(158 64% 25%)",
+          "hsl(158 64% 35%)",
+          "hsl(158 64% 45%)",
+          "hsl(158 64% 55%)",
+          "hsl(158 64% 65%)",
+          "hsl(158 64% 80%)",
+          "hsl(158 64% 95%)"
+        ]
+      },
+      "status-delete": {
+        "role": "semantic",
+        "displayName": "Diff Red",
+        "canonical": "#f87171",
+        "tonalRamp": [
+          "hsl(0 83% 15%)",
+          "hsl(0 83% 25%)",
+          "hsl(0 83% 35%)",
+          "hsl(0 83% 45%)",
+          "hsl(0 83% 55%)",
+          "hsl(0 83% 65%)",
+          "hsl(0 83% 80%)",
+          "hsl(0 83% 95%)"
+        ]
+      },
+      "status-approval": {
+        "role": "semantic",
+        "displayName": "Approval Amber",
+        "canonical": "#fbbf24",
+        "tonalRamp": [
+          "hsl(42 96% 15%)",
+          "hsl(42 96% 25%)",
+          "hsl(42 96% 35%)",
+          "hsl(42 96% 45%)",
+          "hsl(42 96% 55%)",
+          "hsl(42 96% 65%)",
+          "hsl(42 96% 80%)",
+          "hsl(42 96% 95%)"
+        ]
+      },
+      "identity-plate": {
+        "role": "tertiary",
+        "displayName": "Pale Jade Plate",
+        "canonical": "#D9EDE5",
+        "tonalRamp": [
+          "hsl(158 33% 15%)",
+          "hsl(158 33% 25%)",
+          "hsl(158 33% 35%)",
+          "hsl(158 33% 45%)",
+          "hsl(158 33% 55%)",
+          "hsl(158 33% 65%)",
+          "hsl(158 33% 80%)",
+          "hsl(158 33% 95%)"
+        ]
+      },
+      "identity-ink": {
+        "role": "tertiary",
+        "displayName": "Forest Ink",
+        "canonical": "#183E36",
+        "tonalRamp": [
+          "hsl(167 44% 15%)",
+          "hsl(167 44% 25%)",
+          "hsl(167 44% 35%)",
+          "hsl(167 44% 45%)",
+          "hsl(167 44% 55%)",
+          "hsl(167 44% 65%)",
+          "hsl(167 44% 80%)",
+          "hsl(167 44% 95%)"
+        ]
+      },
+      "identity-spark": {
+        "role": "tertiary",
+        "displayName": "Jade Spark",
+        "canonical": "#527E70",
+        "tonalRamp": [
+          "hsl(161 21% 15%)",
+          "hsl(161 21% 25%)",
+          "hsl(161 21% 35%)",
+          "hsl(161 21% 45%)",
+          "hsl(161 21% 55%)",
+          "hsl(161 21% 65%)",
+          "hsl(161 21% 80%)",
+          "hsl(161 21% 95%)"
+        ]
+      },
+      "inverse-surface": {
+        "role": "neutral",
+        "displayName": "Inverse Surface",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#262626",
+          "#404040",
+          "#525252",
+          "#737373",
+          "#a3a3a3",
+          "#d4d4d4",
+          "#f5f5f5",
+          "#ffffff"
+        ]
+      },
+      "inverse-content": {
+        "role": "neutral",
+        "displayName": "Inverse Content",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#000000",
+          "#171717",
+          "#262626",
+          "#404040",
+          "#525252",
+          "#737373",
+          "#a3a3a3",
+          "#f5f5f5"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Welcome Headline", "purpose": "The empty-session welcome question." },
+      "title": { "displayName": "Page Title", "purpose": "Settings and About headings." },
+      "body": { "displayName": "Interface Body", "purpose": "Settings descriptions and supporting copy." },
+      "label": { "displayName": "Compact Label", "purpose": "Control labels, metadata, and compact actions." },
+      "mono": { "displayName": "Technical Mono", "purpose": "Code paths and keybinding values." },
+      "identity-full": { "displayName": "Full Identity", "purpose": "Avenrail name beside the 64px mark in About." }
+    },
+    "shadows": [
+      { "name": "workspace-overlay", "value": "-12px 0 24px hsl(0 0% 0% / 0.12)", "purpose": "Separates the full-width workspace overlay from the rail below 1100px." },
+      { "name": "floating-menu", "value": "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)", "purpose": "Existing shadow-xl treatment for the sidebar options menu." }
+    ],
+    "motion": [
+      { "name": "control-transition", "value": "120ms ease-out", "purpose": "Chrome icon button background and color transitions." },
+      { "name": "approval-toast-in", "value": "180ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Approval toast entrance." },
+      { "name": "zen-ticker-in", "value": "340ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Zen ticker line entrance." },
+      { "name": "zen-ticker-out", "value": "300ms cubic-bezier(0.4, 0, 0.6, 1)", "purpose": "Zen ticker line exit." },
+      { "name": "zen-thinking-pulse", "value": "1.8s ease-in-out infinite", "purpose": "Thinking line breathing state." },
+      { "name": "zen-spin", "value": "3.6s linear infinite", "purpose": "Running tool ring rotation." }
+    ],
+    "breakpoints": [
+      { "name": "workspace-overlay", "value": "1100px" },
+      { "name": "workspace-file-rail", "value": "580px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Full Identity",
+      "kind": "custom",
+      "refersTo": "identity-full",
+      "description": "About identity beside the product description.",
+      "html": "<div class=\"ds-identity ds-identity-full\"><svg viewBox=\"0 0 1024 1024\" aria-hidden=\"true\"><rect x=\"64\" y=\"64\" width=\"896\" height=\"896\" rx=\"206\" fill=\"#D9EDE5\"></rect><path d=\"M280 728 469 324c17-36 69-36 86 0l189 404\" stroke=\"#183E36\" stroke-width=\"88\" stroke-linecap=\"round\" stroke-linejoin=\"round\"></path><path d=\"M376 584h272\" stroke=\"#183E36\" stroke-width=\"80\" stroke-linecap=\"round\"></path><path d=\"m680 332 64-64\" stroke=\"#527E70\" stroke-width=\"48\" stroke-linecap=\"round\"></path></svg><div class=\"ds-identity-copy\"><div class=\"ds-identity-name\">Avenrail</div><div class=\"ds-identity-meta\">A desktop workspace for your coding agents.</div></div></div>",
+      "css": ".ds-identity { display: flex; align-items: center; min-width: 0; color: var(--color-content); font-family: var(--font-sans); } .ds-identity-full { gap: 16px; } .ds-identity-full svg { display: block; flex: 0 0 auto; width: 64px; height: 64px; } .ds-identity-full .ds-identity-name { font-size: 20px; font-weight: 500; line-height: 1.25; letter-spacing: -0.025em; } .ds-identity-full .ds-identity-meta { margin-top: 2px; font-size: 12px; line-height: 1.625; color: color-mix(in srgb, var(--color-content) 65%, transparent); }"
+    },
+    {
+      "name": "Composer Shell",
+      "kind": "card",
+      "refersTo": "composer",
+      "description": "Message-first composer with all controls below the input and no internal divider. Model settings share a compact dropdown. Branch sits beside Send/Stop on the right; an optional project/context row is omitted when empty. Icons identify attachments, model settings, branch, and access.",
+      "html": "<div class=\"ds-composer\"><textarea aria-label=\"Message\" class=\"ds-composer-field\" placeholder=\"How can I help you today?\"></textarea><div class=\"ds-composer-footer\"><div class=\"ds-composer-controls\"><button class=\"ds-tool-button\" type=\"button\" aria-label=\"Attach files\">+</button><button class=\"ds-model-choice\" type=\"button\" aria-label=\"Choose model\">Model</button><span class=\"ds-branch-context\">main</span><button class=\"ds-btn-send\" type=\"button\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m5 12 7-7 7 7M12 5v14\"></path></svg></button></div></div></div>",
+      "css": ".ds-composer { position: relative; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-content) 10%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--color-content) 3%, transparent); color: var(--color-content); font-family: var(--font-sans); } .ds-composer:focus-within { border-color: color-mix(in srgb, var(--color-content) 20%, transparent); } .ds-composer-context { padding: 0 12px 6px; font-size: 12px; color: color-mix(in srgb, var(--color-content) 65%, transparent); } .ds-composer-field { display: block; width: 100%; min-height: 66px; max-height: 160px; resize: none; border: 0; outline: 0; padding: 12px; background: transparent; color: var(--color-content); font: 14px/1.375 var(--font-sans); } .ds-composer-field::placeholder { color: color-mix(in srgb, var(--color-content) 60%, transparent); } .ds-composer-footer { padding-top: 8px; } .ds-composer-controls { display: flex; align-items: center; gap: 4px; padding: 0 8px 8px; } .ds-tool-button { display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 6px; background: transparent; color: color-mix(in srgb, var(--color-content) 50%, transparent); transition: background-color 120ms ease-out, color 120ms ease-out; } .ds-tool-button:hover, .ds-tool-button:focus-visible { background: color-mix(in srgb, var(--color-content) 15%, transparent); color: var(--color-content); } .ds-tool-button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; } .ds-model-choice { height: 26px; border: 0; border-radius: 6px; padding: 0 6px; color: var(--color-content); background: color-mix(in srgb, var(--color-content) 5%, transparent); font: 12px var(--font-sans); } .ds-btn-send { margin-left: 0; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: #fff; color: #000; } .ds-btn-send svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; } .ds-branch-context { margin-left: auto; max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--font-mono); }"
+    },
+    {
+      "name": "Send Button",
+      "kind": "button",
+      "refersTo": "button-send",
+      "description": "Icon-only composer send and stop control.",
+      "html": "<button class=\"ds-btn-send\" type=\"button\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m5 12 7-7 7 7M12 5v14\"></path></svg></button>",
+      "css": ".ds-btn-send { display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 6px; background: #ffffff; color: #000000; transition: background-color 120ms ease-out; } .ds-btn-send svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; } .ds-btn-send:hover { background: rgb(255 255 255 / 0.9); } .ds-btn-send:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; } .ds-btn-send:disabled { cursor: default; background: rgb(255 255 255 / 0.3); color: rgb(0 0 0 / 0.4); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Quiet bordered action used for settings and updates.",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">Check for updates</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid color-mix(in srgb, var(--color-content) 10%, transparent); border-radius: 6px; background: transparent; color: color-mix(in srgb, var(--color-content) 70%, transparent); font: 12px/1.5 var(--font-sans); transition: background-color 120ms ease-out, color 120ms ease-out; } .ds-btn-secondary:hover { background: color-mix(in srgb, var(--color-content) 10%, transparent); color: var(--color-content); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; } .ds-btn-secondary:disabled { cursor: default; opacity: 0.4; }"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "chip",
+      "refersTo": "segmented-selected",
+      "description": "Compact settings choice with a quiet selected wash.",
+      "html": "<div class=\"ds-segmented\" role=\"radiogroup\" aria-label=\"Transcript layout\"><button class=\"ds-segmented-option\" type=\"button\" role=\"radio\" aria-checked=\"true\">Full width</button><button class=\"ds-segmented-option\" type=\"button\" role=\"radio\" aria-checked=\"false\">Chat</button></div>",
+      "css": ".ds-segmented { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid color-mix(in srgb, var(--color-content) 10%, transparent); border-radius: 6px; font: 12px/1.5 var(--font-sans); } .ds-segmented-option { padding: 4px 12px; border: 0; border-radius: 5px; background: transparent; color: color-mix(in srgb, var(--color-content) 50%, transparent); } .ds-segmented-option[aria-checked=\"true\"] { background: color-mix(in srgb, var(--color-content) 10%, transparent); color: var(--color-content); } .ds-segmented-option:hover { color: var(--color-content); } .ds-segmented-option:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }"
+    },
+    {
+      "name": "Toggle",
+      "kind": "button",
+      "refersTo": "toggle-on",
+      "description": "Settings switch with a blue active track and white thumb.",
+      "html": "<button class=\"ds-toggle\" type=\"button\" role=\"switch\" aria-checked=\"true\" aria-label=\"Notes\"><span></span></button>",
+      "css": ".ds-toggle { position: relative; display: block; width: 36px; height: 20px; padding: 0; border: 0; border-radius: 9999px; background: var(--color-accent); transition: background-color 120ms ease-out; } .ds-toggle span { position: absolute; top: 2px; left: 18px; width: 16px; height: 16px; border-radius: 9999px; background: #ffffff; transition: left 120ms ease-out; } .ds-toggle[aria-checked=\"false\"] { background: color-mix(in srgb, var(--color-content) 20%, transparent); } .ds-toggle[aria-checked=\"false\"] span { left: 2px; } .ds-toggle:hover { filter: brightness(1.04); } .ds-toggle:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }"
+    },
+    {
+      "name": "Input Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Search and API-key field used in settings chrome.",
+      "html": "<label class=\"ds-input-field\"><span>API key</span><input type=\"text\" placeholder=\"lin_api_…\" /></label>",
+      "css": ".ds-input-field { display: flex; align-items: center; gap: 8px; width: 208px; height: 28px; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--color-content) 10%, transparent); border-radius: 6px; color: color-mix(in srgb, var(--color-content) 45%, transparent); font: 12px/1.5 var(--font-sans); } .ds-input-field:focus-within { border-color: color-mix(in srgb, var(--color-content) 20%, transparent); } .ds-input-field input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--color-content); font: inherit; } .ds-input-field input::placeholder { color: color-mix(in srgb, var(--color-content) 35%, transparent); } .ds-input-field input:focus-visible { outline: 0; }"
+    },
+    {
+      "name": "Session Row",
+      "kind": "card",
+      "refersTo": "session-row-active",
+      "description": "Detailed project session row with active and approval states.",
+      "html": "<div class=\"ds-session-row\" data-active=\"true\"><button type=\"button\" aria-current=\"page\"><span class=\"ds-session-title\">Review local changes</span><span class=\"ds-session-meta\">2m</span></button></div>",
+      "css": ".ds-session-row { position: relative; border-radius: 8px; background: transparent; color: var(--color-content); } .ds-session-row:hover { background: color-mix(in srgb, var(--color-content) 4%, transparent); } .ds-session-row[data-active] { background: color-mix(in srgb, var(--color-content) 9%, transparent); } .ds-session-row[data-approval] { outline: 1px dashed color-mix(in srgb, var(--color-content) 30%, transparent); outline-offset: -1px; } .ds-session-row button { display: flex; width: 100%; min-width: 0; align-items: center; gap: 6px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--color-content); text-align: left; font: 12px/1.667 var(--font-sans); } .ds-session-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; } .ds-session-meta { flex: 0 0 auto; color: color-mix(in srgb, var(--color-content) 65%, transparent); font-size: 10px; } .ds-session-row button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }"
+    },
+    {
+      "name": "Sidebar Options Menu",
+      "kind": "nav",
+      "refersTo": "options-menu",
+      "description": "Single floating menu for sidebar organization and session filters.",
+      "html": "<div class=\"ds-options-menu\" role=\"menu\"><div class=\"ds-menu-label\">Organize sidebar</div><button type=\"button\" role=\"menuitem\">By project</button><button type=\"button\" role=\"menuitem\">Collapse all projects</button></div>",
+      "css": ".ds-options-menu { width: 228px; max-height: min(70vh, 480px); overflow-y: auto; padding: 4px; border: 1px solid color-mix(in srgb, var(--color-content) 10%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--color-content) 10%, transparent); box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1); backdrop-filter: blur(24px); color: var(--color-content); font: 13px/1 var(--font-sans); } .ds-menu-label { padding: 8px 8px 2px; color: color-mix(in srgb, var(--color-content) 40%, transparent); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; } .ds-options-menu button { display: flex; width: 100%; height: 28px; align-items: center; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--color-content); text-align: left; font: inherit; } .ds-options-menu button:hover { background: color-mix(in srgb, var(--color-content) 5%, transparent); } .ds-options-menu button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Maker's Stamp",
+    "overview": "Avenrail's built identity is a small, legible maker's mark: a forest-ink A on a pale-jade plate with a restrained jade spark. The mark appears at launch and About, while the working surfaces stay in the existing neutral dark/light chrome. System typography keeps the interface quiet, compact, and platform-aware.\n\nThe workspace remains the organizing principle: a left project rail holds sessions grouped by project, detailed session rows carry provider, status, and diff signals, and the right workspace keeps the composer, transcript, files, review, and terminal surfaces bounded. Rebranding changes the name and identity placement without changing navigation or task behavior. There is no animated game background.",
+    "keyCharacteristics": [
+      "Neutral grayscale chrome with theme-driven dark/light lightness and a functional blue accent.",
+      "Forest/jade identity colors reserved for the Avenrail mark.",
+      "System UI type for interface text; ui-monospace for code paths and key values.",
+      "Compact, bounded desktop geometry with a responsive overlay workspace at narrower widths."
+    ],
+    "rules": [
+      { "name": "The Functional Accent Rule", "body": "Keep blue for interaction and state. Keep the jade/forest palette on the Avenrail identity asset instead of recoloring ordinary controls.", "section": "colors" },
+      { "name": "The System Type Rule", "body": "Keep the system and monospace stacks already defined in `src/index.css`; do not add a display font for the rebrand.", "section": "typography" },
+      { "name": "The Flat-at-Rest Rule", "body": "Use tonal surfaces and borders for ordinary chrome; reserve shadows for the responsive overlay and floating menus.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do make the full project heading toggle its sessions without changing the active conversation, and use a subtle 6px scrollbar in conversations, composer text fields, and sidebar options.",
+      "Do preserve the approved project/session workspace arrangement, detailed session cards, collapsible projects, tabbed tools, and single sidebar options menu. Keep New session and compact Search together above the Notes/Inbox row, retaining shortcuts and the unread indicator.",
+      "Do use the functional blue accent for actions, focus, links, and working state, and retain the existing semantic status colors.",
+      "Do support the existing dark/light theme variables, glass opacity behavior, responsive panel bounds, and `prefers-reduced-motion` behavior.",
+      "Do keep the Avenrail mark sourced from `public/avenrail.svg` and place identity only at the boot splash and About.",
+      "Do keep compatibility identifiers stable: `com.monocode.desktop`, `monocode.db`, `monocode.*` and `monocode:*` preference/local-event namespaces, and the `MonoCode.dmg` download alias. Keep `ashish200729/Avenrail` as the primary repository and `hardbeat920/monocode` as upstream.",
+      "Do preserve existing project directory names and saved paths, historical transcripts, updater feed configuration, signing credentials, and provider integrations."
+    ],
+    "donts": [
+      "Don't introduce new navigation, provider capabilities, commercial claims, unverified download endpoints, or a new interaction model as part of this rebrand.",
+      "Don't add an animated game background or move the identity into working controls.",
+      "Don't add a new display font, replace the system stacks, or recolor functional controls with the identity jade/forest palette.",
+      "Don't rename the bundle identifier, database file, preference/event namespaces, or project folders to match the display name.",
+      "Don't treat screenshots or this document as native runtime, signing, notarization, or release validation."
+    ]
+  }
+}

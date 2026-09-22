@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -15,6 +16,7 @@ import {
 } from "../lib/sessionFilters";
 import { HARNESS_TITLE, type HarnessId } from "../lib/session";
 import { HarnessIcon } from "./HarnessIcon";
+import type { SidebarOrganization } from "../lib/sidebarOrganization";
 
 const MENU_WIDTH = 228;
 
@@ -25,6 +27,11 @@ type Props = {
   filters: SessionSidebarFilters;
   onChange: (filters: SessionSidebarFilters) => void;
   onClose: () => void;
+  triggerRef?: RefObject<HTMLButtonElement | null>;
+  organization?: {
+    value: SidebarOrganization;
+    onPick: (id: SidebarOrganization | "expand-all" | "collapse-all") => void;
+  };
 };
 
 const TIME_OPTIONS: { id: SessionTimeFilter; label: string }[] = [
@@ -41,12 +48,18 @@ export function SessionFiltersMenu({
   filters,
   onChange,
   onClose,
+  organization,
+  triggerRef,
 }: Props) {
   const menu = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const hiddenHarnesses = new Set(filters.hiddenHarnesses);
+
+  useLayoutEffect(() => {
+    menu.current?.focus();
+  }, []);
 
   useLayoutEffect(() => {
     const el = menu.current;
@@ -65,10 +78,11 @@ export function SessionFiltersMenu({
       left: Math.max(pad, left),
       top: Math.max(pad, top),
     });
-  }, [x, y, harnesses.length, filters]);
+  }, [x, y, harnesses.length, filters, organization?.value]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
+      if (triggerRef?.current?.contains(event.target as Node)) return;
       if (!menu.current?.contains(event.target as Node)) onCloseRef.current();
     };
     const onKey = (event: KeyboardEvent) => {
@@ -83,7 +97,7 @@ export function SessionFiltersMenu({
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKey, true);
     };
-  }, []);
+  }, [triggerRef]);
 
   const toggleHarness = (harness: HarnessId) => {
     const next = new Set(hiddenHarnesses);
@@ -112,7 +126,43 @@ export function SessionFiltersMenu({
     <div
       ref={menu}
       role="menu"
-      aria-label="Filter sessions"
+      aria-label={organization ? "Sidebar options" : "Filter sessions"}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          const item = (event.target as HTMLElement).closest<HTMLButtonElement>(
+            "button",
+          );
+          if (item && menu.current?.contains(item)) {
+            event.preventDefault();
+            item.click();
+          }
+          return;
+        }
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key))
+          return;
+        event.preventDefault();
+        const items = Array.from(
+          menu.current?.querySelectorAll<HTMLButtonElement>(
+            "button:not(:disabled)",
+          ) ?? [],
+        );
+        if (!items.length) return;
+        const current = items.indexOf(
+          document.activeElement as HTMLButtonElement,
+        );
+        const next =
+          event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? items.length - 1
+              : event.key === "ArrowDown"
+                ? (current + 1) % items.length
+                : current < 0
+                  ? items.length - 1
+                  : (current + items.length - 1) % items.length;
+        items[next]?.focus();
+      }}
       onContextMenu={(event) => event.preventDefault()}
       style={{
         position: "fixed",
@@ -121,8 +171,44 @@ export function SessionFiltersMenu({
         width: MENU_WIDTH,
         zIndex: 80,
       }}
-      className="max-h-[min(70vh,480px)] overflow-y-auto rounded-lg border border-content/10 bg-content/10 p-1 shadow-xl backdrop-blur-xl outline-none"
+      className="app-scrollbar max-h-[min(70vh,480px)] overflow-x-hidden overflow-y-auto rounded-lg border border-content/10 bg-content/10 p-1 shadow-xl backdrop-blur-xl outline-none"
     >
+      {organization ? (
+        <>
+          <SectionLabel>Organize sidebar</SectionLabel>
+          <FilterItem
+            label="By project"
+            checked={organization.value === "project"}
+            onClick={() => organization.onPick("project")}
+          />
+          <FilterItem
+            label="In one list"
+            checked={organization.value === "list"}
+            onClick={() => organization.onPick("list")}
+          />
+          {organization.value === "project" ? (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex h-7 w-full items-center rounded-lg px-2 text-left text-[13px] text-content hover:bg-content/5 focus-visible:outline-2 focus-visible:outline-accent"
+                onClick={() => organization.onPick("expand-all")}
+              >
+                Expand all projects
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="flex h-7 w-full items-center rounded-lg px-2 text-left text-[13px] text-content hover:bg-content/5 focus-visible:outline-2 focus-visible:outline-accent"
+                onClick={() => organization.onPick("collapse-all")}
+              >
+                Collapse all projects
+              </button>
+            </>
+          ) : null}
+          <div role="separator" className="my-1 h-px bg-content/10" />
+        </>
+      ) : null}
       <FilterItem
         label="Archived"
         checked={filters.showArchived}
@@ -181,7 +267,7 @@ export function SessionFiltersMenu({
             role="menuitem"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onChange(DEFAULT_SESSION_SIDEBAR_FILTERS)}
-            className="flex h-7 w-full items-center rounded-lg px-2 text-left text-[13px] leading-none text-content/70 hover:bg-content/5 hover:text-content"
+            className="flex h-7 w-full items-center rounded-lg px-2 text-left text-[13px] leading-none text-content/70 hover:bg-content/5 hover:text-content focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
           >
             Clear filters
           </button>
@@ -218,7 +304,7 @@ function FilterItem({
       aria-checked={checked}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
-      className="flex h-7 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] leading-none text-content hover:bg-content/5"
+      className="flex h-7 w-full items-center gap-2 rounded-lg px-2 text-left text-[13px] leading-none text-content hover:bg-content/5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
     >
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>

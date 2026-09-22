@@ -1,4 +1,4 @@
-import { Check, GitBranch, Plus, Search } from "lucide-react";
+import { Check, GitFork, Plus, Search } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -26,6 +26,7 @@ type Props = {
   cwd: string;
   branch?: string;
   enabled?: boolean;
+  compact?: boolean;
   onChange?: () => void;
   onClose?: () => void;
 };
@@ -60,6 +61,7 @@ export function BranchPicker({
   cwd,
   branch,
   enabled = true,
+  compact = false,
   onChange,
   onClose,
 }: Props) {
@@ -295,7 +297,7 @@ export function BranchPicker({
   const interactive = enabled && !awaitingBranch && !missingGit;
 
   return (
-    <div className="flex max-w-[45%] shrink-0 items-center gap-2.5">
+    <div className={compact ? "composer-branch-picker flex min-w-0 items-center" : "flex max-w-[45%] shrink-0 items-center gap-2.5"}>
       <div ref={root} className="relative min-w-0">
         <button
           type="button"
@@ -329,7 +331,7 @@ export function BranchPicker({
                 } disabled:opacity-40 disabled:hover:text-content/50`
           }
         >
-          <GitBranch className="size-3.5 shrink-0" strokeWidth={1.5} />
+          <GitFork className="size-3.5 shrink-0" strokeWidth={1.75} />
           <span className="relative truncate font-mono text-[12px]">
             {awaitingBranch ? (
               <>
@@ -502,7 +504,7 @@ function BranchList({
                 {selected ? (
                   <Check className="size-3.5 shrink-0" strokeWidth={1.75} />
                 ) : (
-                  <GitBranch
+                  <GitFork
                     className="size-3.5 shrink-0 text-content/50"
                     strokeWidth={1.75}
                   />

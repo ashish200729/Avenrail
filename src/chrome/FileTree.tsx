@@ -1,11 +1,7 @@
 import {
   ChevronDown,
   ChevronRight,
-  FilePlus,
-  FolderPlus,
-  FoldVertical,
   GitCompare,
-  Search,
 } from "lucide-react";
 import {
   createContext,
@@ -55,6 +51,7 @@ import type { GitStatusMap } from "../hooks/useGitFileStatuses";
 import { useProjectDiffStats } from "../hooks/useProjectDiffStats";
 import { ExplorerMenu, type ExplorerMenuItem } from "./ExplorerMenu";
 import { FileTypeIcon } from "./FileTypeIcon";
+import { FileExplorerToolbar } from "./FileExplorerToolbar";
 
 const GIT_STATUS_COLOR: Record<string, string> = {
   modified: "text-amber-400",
@@ -65,6 +62,11 @@ const GIT_STATUS_COLOR: Record<string, string> = {
 
 type Props = {
   cwd: string;
+  active?: boolean;
+  hideRoot?: boolean;
+  filterInput?: ReactNode;
+  filterResults?: ReactNode;
+  onClearFilter?: () => void;
   onOpenFile: (path: string) => void;
   onOpenTerminal?: (cwd: string) => void;
   onFileMoved?: (from: string, to: string) => void;
@@ -215,6 +217,11 @@ function explorerItems(
 
 export function FileTree({
   cwd,
+  active = true,
+  hideRoot = false,
+  filterInput,
+  filterResults,
+  onClearFilter,
   onOpenFile,
   onOpenTerminal,
   onFileMoved,
@@ -223,7 +230,6 @@ export function FileTree({
   gitStatuses,
   sourceControlActive = false,
   onShowSourceControl,
-  deckLayout = false,
 }: Props) {
   const [expanded, setExpanded] = useState(() => loadExpanded(cwd));
   const [selectedPath, setSelectedPath] = useState(() => loadSelected(cwd));
@@ -243,6 +249,10 @@ export function FileTree({
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
   const name = basename(cwd);
   const rootOpen = expanded.has(cwd);
+
+  useEffect(() => {
+    if (!active || filterResults != null) setMenu(null);
+  }, [active, filterResults]);
 
   const toggle = (path: string) => {
     setExpanded((prev) => {
@@ -297,6 +307,7 @@ export function FileTree({
     isDir: boolean,
     atPath: string | null = selectedPath,
   ) => {
+    onClearFilter?.();
     const parent = createParentOf(cwd, atPath);
     setRenaming(null);
     expandDirs([cwd, parent]);
@@ -493,12 +504,14 @@ export function FileTree({
   };
 
   const onBackgroundMenu = (e: ReactMouseEvent) => {
+    if (filterResults != null) return;
     if ((e.target as HTMLElement).closest("input")) return;
     e.preventDefault();
     openMenu({ path: cwd, isDir: true, isRoot: true }, e.clientX, e.clientY);
   };
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (filterResults != null) return;
     if ((e.target as HTMLElement).closest("input")) return;
     if (
       (e.target as HTMLElement).closest("button") &&
@@ -618,99 +631,76 @@ export function FileTree({
         onKeyDown={onKeyDown}
         onContextMenu={onBackgroundMenu}
       >
-        <div
-          className={`flex shrink-0 items-center overflow-visible border-b border-content/10 ${
-            deckLayout ? "h-9" : ""
-          }`}
-          onContextMenu={(e) => e.stopPropagation()}
+        <FileExplorerToolbar
+          active={active}
+          cwd={cwd}
+          onNewFile={() => startCreate(false)}
+          onNewFolder={() => startCreate(true)}
+          onSearch={onSearch}
+          onCollapse={() => {
+            onClearFilter?.();
+            setCreating(null);
+            setRenaming(null);
+            const next = new Set([cwd]);
+            saveExpanded(cwd, next);
+            setExpanded(next);
+          }}
         >
-          <HeaderIcon
-            label="New File"
-            onClick={() => startCreate(false)}
-            deckLayout={deckLayout}
-          >
-            <FilePlus className="size-3.5" strokeWidth={1.75} />
-          </HeaderIcon>
-          <HeaderIcon
-            label="New Folder"
-            onClick={() => startCreate(true)}
-            deckLayout={deckLayout}
-          >
-            <FolderPlus className="size-3.5" strokeWidth={1.75} />
-          </HeaderIcon>
-          <HeaderIcon
-            label="Collapse All"
-            onClick={() => {
-              setCreating(null);
-              setRenaming(null);
-              const next = new Set([cwd]);
-              saveExpanded(cwd, next);
-              setExpanded(next);
-            }}
-            deckLayout={deckLayout}
-          >
-            <FoldVertical className="size-3.5" strokeWidth={1.75} />
-          </HeaderIcon>
-          {onSearch ? (
-            <HeaderIcon
-              label={`Search in files (${MOD}Shift+F)`}
-              onClick={onSearch}
-              deckLayout={deckLayout}
-            >
-              <Search className="size-3.5" strokeWidth={1.75} />
-            </HeaderIcon>
-          ) : null}
           {onShowSourceControl ? (
             <FileTreeDiffButton
               cwd={cwd}
               active={sourceControlActive}
               onClick={onShowSourceControl}
-              deckLayout={deckLayout}
             />
           ) : null}
-        </div>
-        <div className="flex h-8 shrink-0 items-center">
-          <button
-            type="button"
-            aria-expanded={rootOpen}
-            title={cwd}
-            onClick={() => {
-              onSelect(cwd);
-              toggle(cwd);
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              openMenu(
-                { path: cwd, isDir: true, isRoot: true },
-                e.clientX,
-                e.clientY,
-              );
-            }}
-            className={`flex min-w-0 flex-1 items-center gap-1 h-full pl-2 text-left`}
-          >
-            <span className="grid size-4 shrink-0 place-items-center text-content/50">
-              {rootOpen ? (
-                <ChevronDown className="size-3.5" strokeWidth={1.75} />
-              ) : (
-                <ChevronRight className="size-3.5" strokeWidth={1.75} />
-              )}
-            </span>
-            <span className="min-w-0 truncate text-[11px] font-semibold tracking-[0.08em] text-content/50 uppercase">
-              {name}
-            </span>
-          </button>
-        </div>
+        </FileExplorerToolbar>
+        {filterInput}
+        {!hideRoot ? (
+          <div className="flex h-8 shrink-0 items-center">
+            <button
+              type="button"
+              aria-expanded={rootOpen}
+              title={cwd}
+              onClick={() => {
+                onSelect(cwd);
+                toggle(cwd);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openMenu(
+                  { path: cwd, isDir: true, isRoot: true },
+                  e.clientX,
+                  e.clientY,
+                );
+              }}
+              className={`flex min-w-0 flex-1 items-center gap-1 h-full pl-2 text-left`}
+            >
+              <span className="grid size-4 shrink-0 place-items-center text-content/50">
+                {rootOpen ? (
+                  <ChevronDown className="size-3.5" strokeWidth={1.75} />
+                ) : (
+                  <ChevronRight className="size-3.5" strokeWidth={1.75} />
+                )}
+              </span>
+              <span className="min-w-0 truncate text-[11px] font-semibold tracking-[0.08em] text-content/50 uppercase">
+                {name}
+              </span>
+            </button>
+          </div>
+        ) : null}
         <div
           ref={lockOverscroll}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-none"
+          hidden={filterResults != null}
+          inert={filterResults != null || undefined}
+          className="app-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-none"
         >
           {opError ? (
             <p className="px-3 py-1 text-[12px] leading-4 text-red-400">
               {opError}
             </p>
           ) : null}
-          {rootOpen ? (
+          {hideRoot || rootOpen ? (
             <div role="tree" aria-label={`${name} files`}>
               <TreeChildren
                 parent={cwd}
@@ -722,9 +712,15 @@ export function FileTree({
             </div>
           ) : null}
         </div>
+        {filterResults != null ? (
+          <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-none">
+            {filterResults}
+          </div>
+        ) : null}
       </div>
-      {menu ? (
+      {active && menu ? (
         <ExplorerMenu
+          compact
           x={menu.x}
           y={menu.y}
           items={explorerItems(menu.target, clip, !!onOpenTerminal)}
@@ -740,46 +736,14 @@ export function FileTree({
   );
 }
 
-function HeaderIcon({
-  label,
-  onClick,
-  active = false,
-  deckLayout = false,
-  children,
-}: {
-  label: string;
-  onClick?: () => void;
-  active?: boolean;
-  deckLayout?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={active || undefined}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={onClick}
-      className={`flex flex-1 items-center justify-center place-items-center text-content/50 hover:bg-content/10 hover:text-content ${
-        deckLayout ? "h-9" : "h-8"
-      } ${active ? "bg-content/10 text-content" : ""}`}
-    >
-      {children}
-    </button>
-  );
-}
-
 function FileTreeDiffButton({
   cwd,
   active,
   onClick,
-  deckLayout = false,
 }: {
   cwd: string;
   active: boolean;
   onClick: () => void;
-  deckLayout?: boolean;
 }) {
   const enabled = Boolean(cwd) && cwd !== "~";
   const stats = useProjectDiffStats(cwd, enabled);
@@ -808,13 +772,11 @@ function FileTreeDiffButton({
       aria-pressed={active}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
-      className={`relative flex flex-1 shrink-0 items-center justify-center text-content/50 hover:bg-content/10 hover:text-content ${
-        deckLayout ? "h-9" : "h-8"
-      } ${active ? "bg-content/10 text-content" : ""}`}
+      className={`flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-content/65 hover:bg-content/8 hover:text-content focus-visible:outline-2 focus-visible:outline-accent ${active ? "bg-content/10 text-content" : ""}`}
     >
       <GitCompare className="size-3.5" strokeWidth={1.75} />
       {files > 0 ? (
-        <span className="pointer-events-none absolute top-3.5 left-7 grid min-h-3.5 min-w-3.5 place-items-center rounded-full bg-accent px-0.5 text-[7px] font-semibold leading-none text-white tabular-nums">
+        <span className="pointer-events-none text-xs tabular-nums">
           {badge}
         </span>
       ) : null}

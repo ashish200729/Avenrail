@@ -39,6 +39,7 @@ export class JsonRpcClient {
   private nextId = 1;
   private readonly pending = new Map<string, Pending>();
   private closed = false;
+  private closeError = new Error("Harness process exited");
   private readonly includeJsonrpc: boolean;
   private readonly label: string;
 
@@ -71,6 +72,7 @@ export class JsonRpcClient {
     if (this.closed) return;
     this.closed = true;
     const err = error ?? new Error("Harness process exited");
+    this.closeError = err;
     this.rejectPending(err);
   }
 
@@ -90,7 +92,7 @@ export class JsonRpcClient {
     params?: unknown,
     timeoutMs = 0,
   ): Promise<T> {
-    if (this.closed) throw new Error("Harness process is not running");
+    if (this.closed) throw this.closeError;
     const id = this.nextId++;
     const key = String(id);
     // Register before writing. A local harness can answer quickly enough for

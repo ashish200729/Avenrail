@@ -272,7 +272,7 @@ async function confirmQuitAndExit(
     const refs = inFlightRefs(sessions, tabs);
     if (refs.length > 0) {
       const ok = await ask(quitWhileBusyMessage(refs.length), {
-        title: "MonoCode",
+        title: "Avenrail",
         kind: "warning",
         okLabel: "Quit",
       });

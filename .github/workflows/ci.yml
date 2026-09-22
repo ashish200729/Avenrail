@@ -30,6 +30,7 @@ jobs:
           components: rustfmt, clippy
 
       - run: npm ci
+      - run: npm run check:brand
       - run: npm test
       - run: npx tsc --noEmit
       - run: cargo fmt --check

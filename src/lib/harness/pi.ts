@@ -14,7 +14,7 @@ import type { ApprovalDecision, SendTurnInput, SteerTurnInput } from "./types";
 /**
  * Live Pi adapter. Spawns `pi --mode rpc` with the user's config and extensions
  * loaded (no `--no-extensions`). Todos/subagents packages in `~/.pi/agent`
- * keep working; TUI-only widgets do not appear in MonoCode.
+ * keep working; TUI-only widgets do not appear in Avenrail.
  */
 export function sendPiTurn(input: SendTurnInput): Promise<void> {
   return sendTurn(PI_FLAVOR, input);

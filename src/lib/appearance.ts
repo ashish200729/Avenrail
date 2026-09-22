@@ -11,21 +11,21 @@ const BODY_KEY = "monocode.bodyGlass";
 const SCHEME_KEY = "monocode.colorScheme";
 const SIDEBAR_TAB_ORDER_KEY = "monocode.sidebarTabOrder";
 const PROJECT_RAIL_WIDTH_KEY = "monocode.projectRailWidth";
+const WORKSPACE_PANEL_OPEN_KEY = "monocode.workspacePanelOpen";
+const WORKSPACE_PANEL_WIDTH_KEY = "monocode.workspacePanelWidth.v2";
+const WORKSPACE_PANEL_TAB_KEY = "monocode.workspacePanelTab";
 const SIDEBAR_LAYOUT_KEY = "monocode.sidebarLayout";
 const TRANSCRIPT_LAYOUT_KEY = "monocode.transcriptLayout";
 const TRANSCRIPT_ZEN_KEY = "monocode.transcriptZen";
 
 export type ColorScheme = "dark" | "light";
-export type SidebarLayout = "classic" | "deck";
+export type SidebarLayout = "deck";
 export type TranscriptLayout = "full" | "chat";
 
 export const COLOR_SCHEME_DEFAULT: ColorScheme = "dark";
 
 /** Fired on `window` whenever the color scheme flips (detail: ColorScheme). */
 export const SCHEME_CHANGE_EVENT = "monocode:schemechange";
-
-/** Fired on `window` whenever the sidebar layout flips (detail: SidebarLayout). */
-export const LAYOUT_CHANGE_EVENT = "monocode:layoutchange";
 
 export const SIDEBAR_LAYOUT_DEFAULT: SidebarLayout = "deck";
 
@@ -64,9 +64,57 @@ export const SIDEBAR_BLUR_MIN = 1;
 export const SIDEBAR_BLUR_MAX = 64;
 export const SIDEBAR_BLUR_DEFAULT = 24;
 
-export const PROJECT_RAIL_WIDTH_MIN = 180;
+export const PROJECT_RAIL_WIDTH_MIN = 240;
 export const PROJECT_RAIL_WIDTH_MAX = 360;
-export const PROJECT_RAIL_WIDTH_DEFAULT = 200;
+export const PROJECT_RAIL_WIDTH_DEFAULT = 280;
+
+export type WorkspacePanelTab = "files" | "changes";
+export const WORKSPACE_PANEL_WIDTH_MIN = 440;
+export const WORKSPACE_PANEL_WIDTH_MAX = 1600;
+export const WORKSPACE_PANEL_WIDTH_DEFAULT = 760;
+
+export function loadWorkspacePanelOpen(): boolean {
+  return readFlag(WORKSPACE_PANEL_OPEN_KEY) ?? true;
+}
+
+export function saveWorkspacePanelOpen(value: boolean) {
+  writeFlag(WORKSPACE_PANEL_OPEN_KEY, value);
+}
+
+export function loadWorkspacePanelWidth(): number {
+  return Math.round(
+    clamp(
+      readNumber(WORKSPACE_PANEL_WIDTH_KEY) ?? WORKSPACE_PANEL_WIDTH_DEFAULT,
+      WORKSPACE_PANEL_WIDTH_MIN,
+      WORKSPACE_PANEL_WIDTH_MAX,
+    ),
+  );
+}
+
+export function saveWorkspacePanelWidth(value: number) {
+  writeNumber(
+    WORKSPACE_PANEL_WIDTH_KEY,
+    clamp(value, WORKSPACE_PANEL_WIDTH_MIN, WORKSPACE_PANEL_WIDTH_MAX),
+  );
+}
+
+export function loadWorkspacePanelTab(): WorkspacePanelTab {
+  try {
+    return localStorage.getItem(WORKSPACE_PANEL_TAB_KEY) === "changes"
+      ? "changes"
+      : "files";
+  } catch {
+    return "files";
+  }
+}
+
+export function saveWorkspacePanelTab(tab: WorkspacePanelTab) {
+  try {
+    localStorage.setItem(WORKSPACE_PANEL_TAB_KEY, tab);
+  } catch {
+    // The panel remains usable when storage is unavailable.
+  }
+}
 
 export const BODY_GLASS_DEFAULT = true;
 
@@ -141,9 +189,7 @@ export function loadThemeSaturation(): number {
 export function saveThemeSaturation(value: number) {
   writeNumber(
     THEME_SATURATION_KEY,
-    Math.round(
-      clamp(value, THEME_SATURATION_MIN, THEME_SATURATION_MAX),
-    ),
+    Math.round(clamp(value, THEME_SATURATION_MIN, THEME_SATURATION_MAX)),
   );
 }
 
@@ -237,9 +283,7 @@ export function saveSidebarBlur(value: number) {
 }
 
 export function applySidebarBlur(value: number) {
-  const next = Math.round(
-    clamp(value, SIDEBAR_BLUR_MIN, SIDEBAR_BLUR_MAX),
-  );
+  const next = Math.round(clamp(value, SIDEBAR_BLUR_MIN, SIDEBAR_BLUR_MAX));
   void invoke("set_window_background_blur", { radius: next });
   return next;
 }
@@ -321,34 +365,20 @@ export function loadProjectRailWidth(): number {
 export function saveProjectRailWidth(value: number) {
   writeNumber(
     PROJECT_RAIL_WIDTH_KEY,
-    Math.round(
-      clamp(value, PROJECT_RAIL_WIDTH_MIN, PROJECT_RAIL_WIDTH_MAX),
-    ),
+    Math.round(clamp(value, PROJECT_RAIL_WIDTH_MIN, PROJECT_RAIL_WIDTH_MAX)),
   );
 }
 
-function isSidebarLayout(value: unknown): value is SidebarLayout {
-  return value === "classic" || value === "deck";
-}
-
+/** Deck is the only workspace layout. Normalize old choices without touching other preferences. */
 export function loadSidebarLayout(): SidebarLayout {
   try {
-    const raw = localStorage.getItem(SIDEBAR_LAYOUT_KEY);
-    return isSidebarLayout(raw) ? raw : SIDEBAR_LAYOUT_DEFAULT;
+    if (localStorage.getItem(SIDEBAR_LAYOUT_KEY) !== SIDEBAR_LAYOUT_DEFAULT) {
+      localStorage.setItem(SIDEBAR_LAYOUT_KEY, SIDEBAR_LAYOUT_DEFAULT);
+    }
   } catch {
-    return SIDEBAR_LAYOUT_DEFAULT;
+    // Storage is optional; a saved Classic value must never select another layout.
   }
-}
-
-export function saveSidebarLayout(value: SidebarLayout) {
-  try {
-    localStorage.setItem(SIDEBAR_LAYOUT_KEY, value);
-  } catch {
-    // private mode / quota
-  }
-  window.dispatchEvent(
-    new CustomEvent<SidebarLayout>(LAYOUT_CHANGE_EVENT, { detail: value }),
-  );
+  return SIDEBAR_LAYOUT_DEFAULT;
 }
 
 function isTranscriptLayout(value: unknown): value is TranscriptLayout {

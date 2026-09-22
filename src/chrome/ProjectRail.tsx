@@ -1,17 +1,28 @@
 import {
   Archive,
+  ChevronRight,
+  Folder,
   FolderOpen,
-  Inbox,
+  ListTodo,
+  MessageCirclePlus,
   MoreHorizontal,
   Pin,
   PinOff,
-  File,
+  NotebookTabs,
   Plus,
-  Search,
+  SearchCode,
   Settings,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useDragResize } from "../hooks/useDragResize";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
 import { useProjectDiffStats } from "../hooks/useProjectDiffStats";
@@ -29,10 +40,12 @@ import { IS_MAC, MOD } from "../lib/platform";
 import { projectName } from "../lib/paths";
 import {
   collectRailProjects,
+  looksLikeProject,
   loadPinnedProjects,
   loadProjectRailOrder,
   projectRailSections,
   sameProjectPath,
+  normalizeProjectPath,
   savePinnedProjects,
   saveProjectRailOrder,
   syncProjectRailOrder,
@@ -54,6 +67,19 @@ import {
   saveTabGroupLabel,
   saveTabGroupMascot,
 } from "../lib/tabGroups";
+import { SessionFiltersMenu } from "./SessionFiltersMenu";
+import {
+  DEFAULT_SESSION_SIDEBAR_FILTERS,
+  hasActiveSessionFilters,
+  type SessionSidebarFilters,
+} from "../lib/sessionFilters";
+import type { HarnessId } from "../lib/session";
+import {
+  loadSidebarOrganization,
+  saveSidebarOrganization,
+  loadCollapsedSidebarProjects,
+  saveCollapsedSidebarProjects,
+} from "../lib/sidebarOrganization";
 import { ProjectLogoIcon } from "./ProjectLogoIcon";
 import { ProjectMascot } from "./ProjectMascot";
 import { RailAction } from "./RailAction";
@@ -76,6 +102,7 @@ function projectMenuExtraItems(
   canRemove: boolean,
 ): TabGroupMenuExtraItem[] {
   const items: TabGroupMenuExtraItem[] = [
+    { id: "open", label: "Open project", icon: FolderOpen },
     pinned
       ? { id: "unpin", label: "Unpin project", icon: PinOff }
       : { id: "pin", label: "Pin project", icon: Pin },
@@ -110,6 +137,13 @@ type Props = {
   onSelectProject: (path: string) => void;
   onOpenProject: () => void;
   onRemoveProject?: (path: string, options: { purgeData: boolean }) => void;
+  projectSessions?: (path: string) => ReactNode;
+  sessionFilters?: SessionSidebarFilters;
+  sessionHarnesses?: HarnessId[];
+  onSessionFiltersChange?: (filters: SessionSidebarFilters) => void;
+  allSessions?: ReactNode;
+  activeSessionId?: string;
+  onNewSession?: () => void;
   settingsOpen?: boolean;
   settingsSection?: SettingsSectionId;
   onOpenSettings?: () => void;
@@ -137,6 +171,13 @@ export function ProjectRail({
   onSelectProject,
   onOpenProject,
   onRemoveProject,
+  projectSessions,
+  sessionFilters = DEFAULT_SESSION_SIDEBAR_FILTERS,
+  sessionHarnesses = [],
+  onSessionFiltersChange,
+  allSessions,
+  activeSessionId,
+  onNewSession,
   settingsOpen = false,
   settingsSection = "general",
   onOpenSettings,
@@ -151,6 +192,16 @@ export function ProjectRail({
     initial: loadProjectRailWidth(),
     onCommit: saveProjectRailWidth,
   });
+  const [organization, setOrganization] = useState(loadSidebarOrganization);
+  const [collapsedProjects, setCollapsedProjects] = useState(
+    loadCollapsedSidebarProjects,
+  );
+  const [organizeMenu, setOrganizeMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const organizeButton = useRef<HTMLButtonElement>(null);
+  const previousContext = useRef({ cwd, activeSessionId });
   const [railOrder, setRailOrder] = useState(loadProjectRailOrder);
   const [pinnedPaths, setPinnedPaths] = useState(loadPinnedProjects);
   const [groupLabels, setGroupLabels] = useState(loadTabGroupLabels);
@@ -187,6 +238,11 @@ export function ProjectRail({
   }, [busyPaths]);
 
   useEffect(() => {
+    setProjectMenu(null);
+    setOrganizeMenu(null);
+  }, [cwd, settingsOpen, searchActive, inboxActive, notesActive]);
+
+  useEffect(() => {
     setRailOrder((prev) => {
       const synced = syncProjectRailOrder(prev, allProjects);
       if (synced.join("\0") === prev.join("\0")) return prev;
@@ -205,12 +261,15 @@ export function ProjectRail({
   }, [allProjects]);
 
   useEffect(() => {
-    if (!projectMenu) return;
-    const onScroll = () => setProjectMenu(null);
+    if (!projectMenu && !organizeMenu) return;
+    const onScroll = () => {
+      setProjectMenu(null);
+      setOrganizeMenu(null);
+    };
     const scrollParent = scrollRef.current ?? window;
     scrollParent.addEventListener("scroll", onScroll, true);
     return () => scrollParent.removeEventListener("scroll", onScroll, true);
-  }, [projectMenu]);
+  }, [projectMenu, organizeMenu]);
 
   const openProjectMenu = (path: string, x: number, y: number) => {
     setProjectMenu({
@@ -302,7 +361,8 @@ export function ProjectRail({
   const onProjectMenuPick = (action: string) => {
     if (!projectMenu) return;
     const { path, projectKey } = projectMenu;
-    if (action === "pin" || action === "unpin") onTogglePin(path);
+    if (action === "open") selectProject(path);
+    else if (action === "pin" || action === "unpin") onTogglePin(path);
     else if (action === "reveal") void revealPath(path);
     else if (action === "archive") {
       onRemoveProject?.(path, { purgeData: false });
@@ -320,21 +380,95 @@ export function ProjectRail({
     setRemoving(null);
   };
 
+  const updateCollapsed = (next: Set<string>) => {
+    setCollapsedProjects(next);
+    saveCollapsedSidebarProjects(next);
+  };
+  const toggleProject = (path: string) => {
+    const next = new Set(collapsedProjects);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    updateCollapsed(next);
+  };
+  const selectProject = (path: string) => {
+    if (collapsedProjects.has(path)) {
+      const next = new Set(collapsedProjects);
+      next.delete(path);
+      updateCollapsed(next);
+    }
+    onSelectProject(path);
+  };
+  useEffect(() => {
+    const previous = previousContext.current;
+    previousContext.current = { cwd, activeSessionId };
+    if (previous.cwd === cwd && previous.activeSessionId === activeSessionId)
+      return;
+    setCollapsedProjects((current) => {
+      const path = normalizeProjectPath(cwd);
+      if (!current.has(path)) return current;
+      const next = new Set(current);
+      next.delete(path);
+      saveCollapsedSidebarProjects(next);
+      return next;
+    });
+  }, [cwd, activeSessionId]);
+  const pickOrganization = (id: string) => {
+    if (id === "project" || id === "list") {
+      setOrganization(id);
+      saveSidebarOrganization(id);
+    } else if (id === "expand-all") updateCollapsed(new Set());
+    else if (id === "collapse-all")
+      updateCollapsed(new Set(allProjects.keys()));
+    setOrganizeMenu(null);
+    requestAnimationFrame(() => organizeButton.current?.focus());
+  };
+  const organizationActions = (
+    <div className="flex items-center gap-0.5">
+      <button
+        ref={organizeButton}
+        type="button"
+        aria-label={
+          hasActiveSessionFilters(sessionFilters)
+            ? "Sidebar options, filters active"
+            : "Sidebar options"
+        }
+        title="Sidebar options"
+        aria-haspopup="menu"
+        aria-expanded={!!organizeMenu}
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          setOrganizeMenu(
+            organizeMenu ? null : { x: rect.right - 228, y: rect.bottom + 4 },
+          );
+        }}
+        className="relative grid size-6 place-items-center rounded-md text-content/55 hover:bg-content/8 hover:text-content focus-visible:outline-2 focus-visible:outline-accent"
+      >
+        <MoreHorizontal className="size-3.5" strokeWidth={1.75} />
+        {hasActiveSessionFilters(sessionFilters) ? (
+          <span
+            aria-hidden="true"
+            className="absolute right-0.5 top-0.5 size-1 rounded-full bg-accent"
+          />
+        ) : null}
+      </button>
+    </div>
+  );
+
   const pinnedIds = sections.pinned.map((item) => item.path);
   const projectIds = sections.projects.map((item) => item.path);
   const pinnedSortable = useSortable(pinnedIds, onReorderPinned, {
     axis: "y",
-    onActivate: onSelectProject,
+    onActivate: selectProject,
   });
   const projectSortable = useSortable(projectIds, onReorderProjects, {
     axis: "y",
-    onActivate: onSelectProject,
+    onActivate: selectProject,
   });
   return (
     <nav
       ref={resize.setPaneRef}
-      aria-label="Projects"
-      className="sidebar-glass relative flex shrink-0 flex-col border-r border-content/10"
+      aria-label="Projects and sessions"
+      className="sidebar-glass project-sidebar relative flex min-h-0 shrink-0 flex-col border-r border-content/10"
     >
       <div
         className="flex h-10 shrink-0 items-center pr-1.5"
@@ -362,35 +496,52 @@ export function ProjectRail({
         />
       ) : (
         <>
-          <div className="flex shrink-0 flex-col gap-px px-2 pb-2">
+          <div className="flex shrink-0 flex-col gap-1 px-2 pb-3">
+            <div className="flex min-w-0 items-center gap-1">
+            {onNewSession ? (
+              <div className="min-w-0 flex-1">
+              <RailAction
+                label="New session"
+                icon={MessageCirclePlus}
+                onClick={onNewSession}
+                shortcut={`${MOD}T`}
+                isNavButton
+                prominent
+              />
+              </div>
+            ) : null}
             <RailAction
               label="Search"
-              icon={Search}
+              icon={SearchCode}
               onClick={onSearch}
               active={searchActive}
               shortcut={`${MOD}K`}
               ariaLabel={`Search (${MOD}K)`}
               isNavButton
+              iconOnly={!!onNewSession}
             />
-            <RailAction
-              label="Inbox"
-              icon={Inbox}
-              onClick={onOpenInbox}
-              active={inboxActive}
-              dot={inboxUnseen}
-              ariaLabel={inboxUnseen ? "Inbox, new items" : "Inbox"}
-              isNavButton
-            />
+            </div>
+            <div className={`grid min-w-0 gap-1 ${notesEnabled ? "grid-cols-2" : "grid-cols-1"}`}>
             {notesEnabled ? (
               <RailAction
                 label="Notes"
-                icon={File}
+                icon={NotebookTabs}
                 onClick={onOpenNotes}
                 active={notesActive}
                 ariaLabel="Notes"
                 isNavButton
               />
             ) : null}
+            <RailAction
+              label="Inbox"
+              icon={ListTodo}
+              onClick={onOpenInbox}
+              active={inboxActive}
+              dot={inboxUnseen}
+              ariaLabel={inboxUnseen ? "Inbox, new items" : "Inbox"}
+              isNavButton
+            />
+            </div>
           </div>
 
           <div
@@ -400,47 +551,74 @@ export function ProjectRail({
             }}
             className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2"
           >
-            {sections.pinned.length > 0 ? (
-              <ProjectSection
-                label="Pinned"
-                items={sections.pinned}
-                cwd={cwd}
-                busy={busy}
-                sortable={pinnedSortable}
-                pinned
-                searchActive={searchActive || inboxActive || notesActive}
-                onSelect={onSelectProject}
-                onTogglePin={onTogglePin}
-                onContextMenu={onProjectContextMenu}
-                onOpenMenu={openProjectMenu}
-                groupLabels={groupLabels}
-                groupColors={groupColors}
-                groupCustomColors={groupCustomColors}
-                groupLogos={groupLogos}
-                groupMascots={groupMascots}
-              />
-            ) : null}
+            {organization === "project" ? (
+              <>
+                {sections.pinned.length > 0 ? (
+                  <ProjectSection
+                    label="Pinned"
+                    items={sections.pinned}
+                    cwd={cwd}
+                    busy={busy}
+                    sortable={pinnedSortable}
+                    searchActive={searchActive || inboxActive || notesActive}
+                    onContextMenu={onProjectContextMenu}
+                    onOpenMenu={openProjectMenu}
+                    groupLabels={groupLabels}
+                    groupColors={groupColors}
+                    groupCustomColors={groupCustomColors}
+                    groupLogos={groupLogos}
+                    groupMascots={groupMascots}
+                    projectSessions={projectSessions}
+                    collapsedProjects={collapsedProjects}
+                    onToggleProject={toggleProject}
+                  />
+                ) : null}
 
-            <ProjectSection
-              label="Projects"
-              items={sections.projects}
-              emptyLabel="No projects yet"
-              onAdd={onOpenProject}
-              cwd={cwd}
-              busy={busy}
-              sortable={projectSortable}
-              pinned={false}
-              searchActive={searchActive || inboxActive || notesActive}
-              onSelect={onSelectProject}
-              onTogglePin={onTogglePin}
-              onContextMenu={onProjectContextMenu}
-              onOpenMenu={openProjectMenu}
-              groupLabels={groupLabels}
-              groupColors={groupColors}
-              groupCustomColors={groupCustomColors}
-              groupLogos={groupLogos}
-              groupMascots={groupMascots}
-            />
+                <ProjectSection
+                  label="Projects"
+                  items={sections.projects}
+                  emptyLabel="No projects yet"
+                  onAdd={onOpenProject}
+                  actions={organizationActions}
+                  cwd={cwd}
+                  busy={busy}
+                  sortable={projectSortable}
+                  searchActive={searchActive || inboxActive || notesActive}
+                  onContextMenu={onProjectContextMenu}
+                  onOpenMenu={openProjectMenu}
+                  groupLabels={groupLabels}
+                  groupColors={groupColors}
+                  groupCustomColors={groupCustomColors}
+                  groupLogos={groupLogos}
+                  groupMascots={groupMascots}
+                  projectSessions={projectSessions}
+                  collapsedProjects={collapsedProjects}
+                  onToggleProject={toggleProject}
+                />
+                {!looksLikeProject(cwd) && projectSessions ? (
+                  <div className="px-3">{projectSessions(cwd)}</div>
+                ) : null}
+              </>
+            ) : (
+              <section className="min-w-0 px-2">
+                <div className="mb-1 flex items-center gap-1 px-2 pt-1">
+                  <span className="min-w-0 flex-1 text-xs text-content/55">
+                    Recents
+                  </span>
+                  {organizationActions}
+                  <button
+                    type="button"
+                    aria-label="Open project"
+                    title="Open project"
+                    onClick={onOpenProject}
+                    className="grid size-6 place-items-center rounded text-content/55 hover:bg-content/8 hover:text-content"
+                  >
+                    <Plus className="size-3.5" />
+                  </button>
+                </div>
+                {allSessions}
+              </section>
+            )}
           </div>
           <div className="p-2 pb-1">
             <SidebarUpdate />
@@ -457,6 +635,21 @@ export function ProjectRail({
           </div>
         </>
       )}
+      {organizeMenu ? (
+        <SessionFiltersMenu
+          triggerRef={organizeButton}
+          x={organizeMenu.x}
+          y={organizeMenu.y}
+          harnesses={sessionHarnesses}
+          filters={sessionFilters}
+          onChange={(next) => onSessionFiltersChange?.(next)}
+          organization={{ value: organization, onPick: pickOrganization }}
+          onClose={() => {
+            setOrganizeMenu(null);
+            organizeButton.current?.focus();
+          }}
+        />
+      ) : null}
       {projectMenu ? (
         <TabGroupMenu
           x={projectMenu.x}
@@ -521,11 +714,13 @@ export function ProjectRail({
         aria-valuenow={resize.width}
         aria-valuemin={PROJECT_RAIL_WIDTH_MIN}
         aria-valuemax={PROJECT_RAIL_WIDTH_MAX}
+        tabIndex={0}
         className={`absolute inset-y-0 -right-px z-10 w-1.5 cursor-col-resize touch-none ${
           resize.dragging ? "bg-content/15" : "hover:bg-content/10"
         }`}
         onPointerDown={resize.onPointerDown}
         onDoubleClick={resize.onDoubleClick}
+        onKeyDown={resize.onKeyDown}
       />
     </nav>
   );
@@ -538,13 +733,11 @@ function ProjectSection({
   items,
   emptyLabel,
   onAdd,
+  actions,
   cwd,
   busy,
   sortable,
-  pinned,
   searchActive,
-  onSelect,
-  onTogglePin,
   onContextMenu,
   onOpenMenu,
   groupLabels,
@@ -552,18 +745,19 @@ function ProjectSection({
   groupCustomColors,
   groupLogos,
   groupMascots,
+  projectSessions,
+  collapsedProjects,
+  onToggleProject,
 }: {
   label: string;
   items: RecentProject[];
   emptyLabel?: string;
   onAdd?: () => void;
+  actions?: ReactNode;
   cwd: string;
   busy: Set<string>;
   sortable: SortableHandle;
-  pinned: boolean;
   searchActive: boolean;
-  onSelect: (path: string) => void;
-  onTogglePin: (path: string) => void;
   onContextMenu: (path: string, event: MouseEvent<HTMLElement>) => void;
   onOpenMenu: (path: string, x: number, y: number) => void;
   groupLabels: Record<string, string>;
@@ -571,13 +765,17 @@ function ProjectSection({
   groupCustomColors: Record<string, string>;
   groupLogos: ReturnType<typeof useTabGroupLogos>;
   groupMascots: Record<string, string>;
+  projectSessions?: (path: string) => ReactNode;
+  collapsedProjects: Set<string>;
+  onToggleProject: (path: string) => void;
 }) {
   return (
-    <div className="shrink-0 mb-2">
+    <div className="mb-3 shrink-0">
       <div className="flex items-center gap-1 px-3 pb-1.5 pt-1">
         <span className="min-w-0 flex-1 truncate px-1 text-xs text-content/50">
           {label}
         </span>
+        {actions}
         {onAdd ? (
           <button
             type="button"
@@ -597,24 +795,41 @@ function ProjectSection({
       ) : null}
       <div className="flex flex-col gap-px px-2">
         {items.map((item, index) => (
-          <ProjectCard
-            key={item.path}
-            item={item}
-            selected={!searchActive && sameProjectPath(item.path, cwd)}
-            busy={isBusyPath(item.path, busy)}
-            pinned={pinned}
-            sortable={sortable}
-            index={index}
-            onSelect={onSelect}
-            onTogglePin={onTogglePin}
-            onContextMenu={onContextMenu}
-            onOpenMenu={onOpenMenu}
-            groupLabels={groupLabels}
-            groupColors={groupColors}
-            groupCustomColors={groupCustomColors}
-            groupLogos={groupLogos}
-            groupMascots={groupMascots}
-          />
+          <Fragment key={item.path}>
+            <ProjectCard
+              item={item}
+              expanded={!collapsedProjects.has(item.path)}
+              onToggle={() => onToggleProject(item.path)}
+              selected={!searchActive && sameProjectPath(item.path, cwd)}
+              busy={isBusyPath(item.path, busy)}
+              sortable={sortable}
+              index={index}
+              onContextMenu={onContextMenu}
+              onOpenMenu={onOpenMenu}
+              groupLabels={groupLabels}
+              groupColors={groupColors}
+              groupCustomColors={groupCustomColors}
+              groupLogos={groupLogos}
+              groupMascots={groupMascots}
+            />
+            {projectSessions ? (
+              <div
+                id={`sidebar-project-${encodeURIComponent(item.path)}`}
+                hidden={collapsedProjects.has(item.path)}
+                role="group"
+                aria-label={`${resolveTabGroupLabel(projectName(item.path), groupLabels, basename(item.path))} sessions`}
+                className={
+                  collapsedProjects.has(item.path)
+                    ? "hidden"
+                    : "min-w-0 pb-2 pl-4"
+                }
+              >
+                {!collapsedProjects.has(item.path)
+                  ? projectSessions(item.path)
+                  : null}
+              </div>
+            ) : null}
+          </Fragment>
         ))}
       </div>
     </div>
@@ -622,17 +837,16 @@ function ProjectSection({
 }
 
 const nameClassName =
-  "min-w-0 flex-1 truncate text-sm font-medium leading-tight";
+  "min-w-0 flex-1 truncate text-[13px] font-medium leading-tight";
 
 function ProjectCard({
   item,
+  expanded,
+  onToggle,
   selected,
   busy,
-  pinned,
   sortable,
   index,
-  onSelect,
-  onTogglePin,
   onContextMenu,
   onOpenMenu,
   groupLabels,
@@ -642,13 +856,12 @@ function ProjectCard({
   groupMascots,
 }: {
   item: RecentProject;
+  expanded: boolean;
+  onToggle: () => void;
   selected: boolean;
   busy: boolean;
-  pinned: boolean;
   sortable: SortableHandle;
   index: number;
-  onSelect: (path: string) => void;
-  onTogglePin: (path: string) => void;
   onContextMenu: (path: string, event: MouseEvent<HTMLElement>) => void;
   onOpenMenu: (path: string, x: number, y: number) => void;
   groupLabels: Record<string, string>;
@@ -680,20 +893,16 @@ function ProjectCard({
     sortable.toIndex > sortable.fromIndex;
   const diffEnabled = Boolean(item.path) && item.path !== "~";
   const stats = useProjectDiffStats(item.path, diffEnabled);
-  const files = stats?.files ?? 0;
-  const additions = stats?.additions ?? 0;
-  const deletions = stats?.deletions ?? 0;
-  const hasChanges = files > 0 || additions > 0 || deletions > 0;
   const cardTitle = projectCardTitle(item.path, name, stats, busy);
   const cardAriaLabel = projectCardAriaLabel(name, stats, busy);
 
   return (
     <div
       ref={(el) => sortable.setItemRef(item.path, el)}
-      className={`group relative flex touch-none items-stretch rounded-md px-2 py-2 ${
+      className={`group relative flex min-h-9 touch-none items-stretch rounded-lg px-2 py-1.5 ${
         selected
-          ? "bg-content/12 text-content"
-          : "opacity-65 hover:bg-content/5 hover:text-content"
+          ? "text-content"
+          : "text-content/70 hover:bg-content/5 hover:text-content"
       } ${dragging ? "opacity-40" : ""} cursor-default`}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
@@ -707,7 +916,7 @@ function ProjectCard({
           return;
         }
         if (sortable.consumeClick()) return;
-        onSelect(item.path);
+        onToggle();
       }}
       onContextMenu={(event) => onContextMenu(item.path, event)}
     >
@@ -719,28 +928,52 @@ function ProjectCard({
       ) : null}
       <button
         type="button"
-        title={cardTitle}
-        aria-label={cardAriaLabel}
+        title={`${expanded ? "Collapse" : "Expand"} project\n${cardTitle}`}
+        aria-label={`${expanded ? "Collapse" : "Expand"} ${cardAriaLabel}`}
+        aria-expanded={expanded}
+        aria-controls={`sidebar-project-${encodeURIComponent(item.path)}`}
         aria-current={selected ? "true" : undefined}
-        className="flex min-w-0 flex-1 cursor-default items-center gap-2 text-left group-hover:pr-6"
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" ||
+            event.key === " " ||
+            (event.key === "ArrowLeft" && expanded) ||
+            (event.key === "ArrowRight" && !expanded)
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggle();
+          }
+        }}
+        className="group/heading flex min-w-0 flex-1 cursor-default items-center gap-2 rounded pr-7 text-left focus-visible:outline-2 focus-visible:outline-accent"
       >
-        <div className="grid size-4 shrink-0 place-items-center transition-opacity group-hover:opacity-0">
-          {logoPath && !busy ? (
-            <ProjectLogoIcon
-              path={logoPath}
-              className="size-4 rounded-sm"
-              imageClassName="size-4"
-            />
-          ) : (
-            <ProjectMascot
-              project={projectKey}
-              color={color}
-              name={resolveTabGroupMascot(projectKey, groupMascots)}
-              className="size-3"
-              active={busy}
-            />
-          )}
-        </div>
+        <span className="relative -ml-1 grid size-6 shrink-0 place-items-center text-content/65">
+          <span className="grid place-items-center group-hover/heading:opacity-0 group-focus-visible/heading:opacity-0">
+            {logoPath ? (
+              <ProjectLogoIcon
+                path={logoPath}
+                className="size-4 rounded-sm"
+                imageClassName="size-4"
+              />
+            ) : groupMascots[projectKey] ? (
+              <ProjectMascot
+                project={projectKey}
+                color={color}
+                name={resolveTabGroupMascot(projectKey, groupMascots)}
+                className="size-3"
+                active={busy}
+              />
+            ) : expanded ? (
+              <FolderOpen className="size-4" strokeWidth={1.75} />
+            ) : (
+              <Folder className="size-4" strokeWidth={1.75} />
+            )}
+          </span>
+          <ChevronRight
+            className={`absolute size-3.5 opacity-0 group-hover/heading:opacity-100 group-focus-visible/heading:opacity-100 ${expanded ? "rotate-90" : ""}`}
+            strokeWidth={1.75}
+          />
+        </span>
         {busy ? (
           <Shimmer as="span" duration={1.4} className={nameClassName}>
             {name}
@@ -748,11 +981,6 @@ function ProjectCard({
         ) : (
           <span className={nameClassName}>{name}</span>
         )}
-        {hasChanges ? (
-          <span className="shrink-0 group-hover:hidden">
-            <ProjectDiffStat additions={additions} deletions={deletions} />
-          </span>
-        ) : null}
       </button>
       <button
         type="button"
@@ -763,29 +991,12 @@ function ProjectCard({
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          onOpenMenu(item.path, event.clientX, event.clientY);
+          const rect = event.currentTarget.getBoundingClientRect();
+          onOpenMenu(item.path, rect.right - 228, rect.bottom + 4);
         }}
-        className="absolute right-1 top-1/2 hidden size-6 -translate-y-1/2 place-items-center rounded-md text-content/55 hover:bg-content/8 hover:text-content group-hover:grid"
+        className="absolute right-1 top-1/2 hidden size-6 -translate-y-1/2 place-items-center rounded-md text-content/55 hover:bg-content/8 hover:text-content group-hover:grid group-focus-within:grid"
       >
         <MoreHorizontal className="size-4" strokeWidth={1.75} />
-      </button>
-      <button
-        type="button"
-        data-no-drag
-        title={pinned ? "Unpin project" : "Pin project"}
-        aria-label={pinned ? "Unpin project" : "Pin project"}
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          onTogglePin(item.path);
-        }}
-        className="absolute left-2 top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-sm text-content/55 opacity-0 pointer-events-none transition-opacity hover:text-content group-hover:pointer-events-auto group-hover:opacity-100"
-      >
-        {pinned ? (
-          <PinOff className="size-3.5" strokeWidth={1.75} />
-        ) : (
-          <Pin className="size-3.5" strokeWidth={1.75} />
-        )}
       </button>
     </div>
   );
@@ -796,37 +1007,6 @@ function isBusyPath(path: string, busy: Set<string>): boolean {
     if (sameProjectPath(path, other)) return true;
   }
   return false;
-}
-
-function ProjectDiffStat({
-  additions,
-  deletions,
-}: {
-  additions: number;
-  deletions: number;
-}) {
-  if (additions <= 0 && deletions <= 0) return null;
-
-  const label = [
-    additions > 0 ? `+${additions}` : "",
-    deletions > 0 ? `-${deletions}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    <span
-      title={`${label} uncommitted`}
-      className="flex shrink-0 items-center gap-1 font-mono text-[11px] font-semibold tabular-nums"
-    >
-      {additions > 0 ? (
-        <span className="text-emerald-400">+{additions}</span>
-      ) : null}
-      {deletions > 0 ? (
-        <span className="text-red-400">-{deletions}</span>
-      ) : null}
-    </span>
-  );
 }
 
 function projectCardTitle(

@@ -27,7 +27,7 @@ export type SkillSource =
   | "pi"
   | "omp"
   | "fx"
-  | "monocode";
+  | "avenrail";
 
 export type Skill = {
   name: string;
@@ -48,7 +48,7 @@ export const BUILTIN_CREATE_SKILL: Skill = {
   description: CREATE_SKILL_DESCRIPTION,
   path: "",
   scope: "builtin",
-  source: "monocode",
+  source: "avenrail",
 };
 
 const SKILL_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -109,7 +109,7 @@ function asSkill(skill: DiscoveredSkill): Skill {
     description: skill.description,
     path: skill.path,
     scope: skill.scope === "user" ? "user" : "project",
-    source: skill.source === "monocode" ? "monocode" : skill.source,
+    source: skill.source === "avenrail" ? "avenrail" : skill.source,
   };
 }
 

@@ -71,20 +71,42 @@ function clearBuffered(id: string) {
 }
 
 function ensureBridge() {
-  if (bridge) return;
-  bridge = Promise.all([
-    listen<DataPayload>("pty-data", (event) => {
-      const { id, data } = event.payload;
-      const chunk = decodeBase64(data);
-      const handler = dataHandlers.get(id);
-      if (handler) handler(chunk);
-      else pushBuffered(id, chunk);
-    }),
-    listen<ExitPayload>("pty-exit", (event) => {
-      const { id, code } = event.payload;
-      exitHandlers.get(id)?.(code);
-    }),
-  ]);
+  if (bridge) return bridge;
+  let failed = false;
+  const installed: UnlistenFn[] = [];
+  const install = (request: Promise<UnlistenFn>) =>
+    request.then((stop) => {
+      if (failed) stop();
+      else installed.push(stop);
+      return stop;
+    });
+  const pending = Promise.all([
+    install(
+      listen<DataPayload>("pty-data", (event) => {
+        const { id, data } = event.payload;
+        const chunk = decodeBase64(data);
+        const handler = dataHandlers.get(id);
+        if (handler) handler(chunk);
+        else pushBuffered(id, chunk);
+      }),
+    ),
+    install(
+      listen<ExitPayload>("pty-exit", (event) => {
+        const { id, code } = event.payload;
+        exitHandlers.get(id)?.(code);
+      }),
+    ),
+  ]).catch((error) => {
+    failed = true;
+    installed.splice(0).forEach((stop) => stop());
+    if (bridge === pending) bridge = null;
+    throw error;
+  });
+  bridge = pending;
+  // retain() can precede the view's first fit. The launch still receives the
+  // original rejection, but a failure before that fit is not left unhandled.
+  void pending.catch(() => undefined);
+  return pending;
 }
 
 function retain() {
@@ -102,9 +124,11 @@ function release() {
   const pending = bridge;
   teardownTimer = setTimeout(() => {
     teardownTimer = undefined;
-    if (users > 0) return;
+    if (users > 0 || bridge !== pending) return;
     bridge = null;
-    void pending.then((fns) => fns.forEach((fn) => fn()));
+    void pending
+      .then((fns) => fns.forEach((fn) => fn()))
+      .catch(() => undefined);
   }, 500);
 }
 
@@ -113,7 +137,13 @@ export async function spawnPty(
   cwd: string,
   cols: number,
   rows: number,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) throw new Error("Terminal launch cancelled");
+  // A shell can print immediately; subscribe before launching so its first
+  // prompt and OSC metadata cannot race asynchronous event-listener setup.
+  await ensureBridge();
+  if (signal?.aborted) throw new Error("Terminal launch cancelled");
   await invoke("pty_spawn", { id, cwd, cols, rows });
 }
 

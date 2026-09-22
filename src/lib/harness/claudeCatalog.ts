@@ -187,7 +187,7 @@ export function refreshClaudeCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("claude", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] claude catalog", error);
+      console.debug("[avenrail] claude catalog", error);
     })
     .finally(() => {
       inflight = null;

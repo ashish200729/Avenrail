@@ -43,4 +43,13 @@ describe("JsonRpcClient", () => {
 
     await expect(client.request("initialize")).rejects.toThrow("pipe closed");
   });
+
+  it("preserves the process error for requests made after an early exit", async () => {
+    const client = new JsonRpcClient("early-exit", {});
+    client.close(new Error("app-server exited (code 127): node not found"));
+
+    await expect(client.request("initialize")).rejects.toThrow(
+      "app-server exited (code 127): node not found",
+    );
+  });
 });

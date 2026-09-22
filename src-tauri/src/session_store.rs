@@ -1382,7 +1382,7 @@ mod tests {
     #[test]
     fn upsert_snapshots_git_branch() {
         let dir = std::env::temp_dir().join(format!(
-            "monocode-session-git-{}-{}",
+            "avenrail-session-git-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -1571,7 +1571,7 @@ mod tests {
     #[test]
     fn migrate_creates_workspace_tables_when_versions_already_recorded() {
         let path = std::env::temp_dir().join(format!(
-            "monocode-stale-migrations-{}-{}.db",
+            "avenrail-stale-migrations-{}-{}.db",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

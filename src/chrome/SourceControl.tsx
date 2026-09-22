@@ -3,6 +3,7 @@ import { GitChangesPanel } from "./GitChangesPanel";
 
 type Props = {
   cwd: string;
+  toolbarTarget?: HTMLElement | null;
   enabled: boolean;
   textHarness?: HarnessId;
   selectedPath?: string;
@@ -11,6 +12,7 @@ type Props = {
 
 export function SourceControl({
   cwd,
+  toolbarTarget,
   enabled,
   textHarness,
   selectedPath,
@@ -20,6 +22,7 @@ export function SourceControl({
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
       <GitChangesPanel
         cwd={cwd}
+        toolbarTarget={toolbarTarget}
         enabled={enabled}
         textHarness={textHarness}
         selectedPath={selectedPath}

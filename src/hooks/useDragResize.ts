@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { suppressTextSelection } from "../lib/drag";
 
@@ -13,6 +14,7 @@ type Options = {
   defaultWidth: number;
   initial: number;
   onCommit?: (width: number) => void;
+  side?: "left" | "right";
 };
 
 function clampTo(value: number, min: number, max: number) {
@@ -26,6 +28,7 @@ export function useDragResize({
   defaultWidth,
   initial,
   onCommit,
+  side = "left",
 }: Options) {
   const minRef = useRef(min);
   minRef.current = min;
@@ -81,7 +84,9 @@ export function useDragResize({
 
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerId !== pointerId) return;
-      apply(clamp(startW + (ev.clientX - startX)));
+      apply(
+        clamp(startW + (ev.clientX - startX) * (side === "right" ? -1 : 1)),
+      );
     };
 
     const stop = () => {
@@ -119,11 +124,24 @@ export function useDragResize({
     commit(defaultRef.current);
   };
 
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === "Home") commit(minRef.current);
+    else if (event.key === "End") commit(maxRef.current());
+    else {
+      const delta =
+        (event.key === "ArrowRight" ? 16 : -16) * (side === "right" ? -1 : 1);
+      commit(widthRef.current + delta);
+    }
+  };
+
   return {
     width,
     dragging,
     setPaneRef,
     onPointerDown,
     onDoubleClick,
+    onKeyDown,
   };
 }

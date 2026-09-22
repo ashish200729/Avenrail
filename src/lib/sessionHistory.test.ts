@@ -58,17 +58,17 @@ describe("historyWithLiveSessions", () => {
   });
 
   it("stamps composer git onto a live session that is not persisted yet", () => {
-    const session = newSession("cursor", "/tmp/monocode");
+    const session = newSession("cursor", "/tmp/avenrail");
     session.blocks = [{ id: "u1", role: "user", text: "hello" }];
     session.busy = true;
 
-    const rows = historyWithLiveSessions([], [session], "/tmp/monocode", {
-      repo: "monocode",
+    const rows = historyWithLiveSessions([], [session], "/tmp/avenrail", {
+      repo: "avenrail",
       branch: "main",
     });
     expect(rows[0]).toMatchObject({
       id: session.id,
-      repo: "monocode",
+      repo: "avenrail",
       branch: "main",
     });
   });
@@ -77,7 +77,7 @@ describe("historyWithLiveSessions", () => {
     const history = [
       {
         ...summary("a1", "/tmp/agent-terminal"),
-        repo: "monocode",
+        repo: "avenrail",
         branch: "main",
       },
     ];
@@ -93,7 +93,7 @@ describe("historyWithLiveSessions", () => {
     );
     const live = rows.find((row) => row.id === session.id);
     expect(live).toMatchObject({
-      repo: "monocode",
+      repo: "avenrail",
       branch: "fix-gutter",
     });
   });
@@ -108,11 +108,11 @@ describe("historyWithLiveSessions", () => {
       [],
       [session],
       "/tmp/agent-terminal",
-      { repo: "monocode", branch: "main" },
+      { repo: "avenrail", branch: "main" },
     );
     expect(rows[0]).toMatchObject({
       id: session.id,
-      repo: "monocode",
+      repo: "avenrail",
       branch: "feat/picker",
     });
   });

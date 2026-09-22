@@ -1,5 +1,5 @@
 {
-  "name": "monocode-desktop",
+  "name": "avenrail-desktop",
   "private": true,
   "version": "0.1.18",
   "type": "module",
@@ -10,12 +10,14 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run check:web && npm run check:rust",
+    "check": "npm run check:brand && npm run check:web && npm run check:rust",
     "check:web": "vitest run && tsc --noEmit",
     "check:rust": "cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test",
     "set-version": "node scripts/bump-version.mjs",
     "tauri": "tauri",
-    "tauri:stable": "tauri dev --no-watch --config src-tauri/tauri.stable.conf.json"
+    "tauri:stable": "tauri dev --no-watch --config src-tauri/tauri.stable.conf.json",
+    "icons": "node scripts/generate-icons.mjs",
+    "check:brand": "node scripts/check-brand.mjs"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",

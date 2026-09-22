@@ -327,7 +327,7 @@ struct DockMenuTargetIvars {
 
 define_class!(
     #[unsafe(super(NSObject))]
-    #[name = "MonoCodeDockMenuTarget"]
+    #[name = "AvenrailDockMenuTarget"]
     #[ivars = DockMenuTargetIvars]
     struct DockMenuTarget;
 
@@ -401,7 +401,7 @@ pub(crate) fn install_dock_menu(app: &AppHandle) {
 #[cfg(debug_assertions)]
 pub(crate) fn ensure_dev_bundle() {
     if let Err(err) = relaunch_from_dev_bundle() {
-        eprintln!("monocode: macos dev bundle: {err}");
+        eprintln!("avenrail: macos dev bundle: {err}");
     }
 }
 
@@ -459,12 +459,12 @@ fn relaunch_from_dev_bundle() -> Result<(), String> {
     let app = exe
         .parent()
         .ok_or("missing exe parent")?
-        .join("MonoCode.app");
+        .join("Avenrail.app");
     let macos_dir = app.join("Contents/MacOS");
     std::fs::create_dir_all(&macos_dir).map_err(|e| e.to_string())?;
     write_dev_bundle_icons(&app)?;
 
-    let bundled = macos_dir.join("monocode");
+    let bundled = macos_dir.join("avenrail");
     let _ = std::fs::remove_file(&bundled);
     if std::fs::hard_link(&exe, &bundled).is_err() {
         std::fs::copy(&exe, &bundled).map_err(|e| e.to_string())?;
@@ -487,7 +487,9 @@ fn write_dev_bundle_icons(app: &std::path::Path) -> Result<(), String> {
     std::fs::create_dir_all(&resources).map_err(|e| e.to_string())?;
     std::fs::write(app.join("Contents/Info.plist"), DEV_BUNDLE_PLIST).map_err(|e| e.to_string())?;
     std::fs::write(resources.join("AppIcon.icns"), DEV_ICNS).map_err(|e| e.to_string())?;
-    std::fs::write(resources.join("Assets.car"), DEV_ASSETS_CAR).map_err(|e| e.to_string())?;
+    // Remove the old compiled icon catalog from an existing dev bundle.
+    // Otherwise Icon Services may prefer its previous brand over AppIcon.icns.
+    let _ = std::fs::remove_file(resources.join("Assets.car"));
     let _ = std::process::Command::new("/usr/bin/touch")
         .arg(app)
         .status();
@@ -497,38 +499,40 @@ fn write_dev_bundle_icons(app: &std::path::Path) -> Result<(), String> {
 #[cfg(debug_assertions)]
 const DEV_ICNS: &[u8] = include_bytes!("../icons/icon.icns");
 #[cfg(debug_assertions)]
-const DEV_ASSETS_CAR: &[u8] = include_bytes!("../macos/Assets.car");
-#[cfg(debug_assertions)]
-const DEV_BUNDLE_PLIST: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
+const DEV_BUNDLE_PLIST: &str = concat!(
+    r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>MonoCode</string>
+	<string>Avenrail</string>
 	<key>CFBundleExecutable</key>
-	<string>monocode</string>
+	<string>avenrail</string>
 	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
-	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.monocode.desktop</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>MonoCode</string>
+	<string>Avenrail</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.75</string>
+	<string>"#,
+    env!("CARGO_PKG_VERSION"),
+    r#"</string>
 	<key>CFBundleVersion</key>
-	<string>0.1.75.5</string>
+	<string>"#,
+    env!("CARGO_PKG_VERSION"),
+    r#"</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>
 </plist>
-"#;
+"#
+);

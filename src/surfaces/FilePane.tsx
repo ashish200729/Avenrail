@@ -1,5 +1,15 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { memo } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   MarkdownViewShell,
   useMarkdownMode,
@@ -21,6 +31,8 @@ import { TerminalView } from "./TerminalView";
 
 type Props = {
   pane: EditorPane;
+  hideTabs?: boolean;
+  present?: boolean;
   focused: boolean;
   dirtyFileIds: Set<string>;
   fileErrorCounts: Map<string, number>;
@@ -39,6 +51,7 @@ type Props = {
 
 function FilePaneComponent({
   pane,
+  hideTabs = false,
   focused,
   dirtyFileIds,
   fileErrorCounts,
@@ -59,16 +72,18 @@ function FilePaneComponent({
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
       onMouseDown={() => onFocus(pane.id)}
     >
-      <SurfaceTabs
-        files={pane.files}
-        activeFileId={pane.activeFileId}
-        dirtyFileIds={dirtyFileIds}
-        fileErrorCounts={fileErrorCounts}
-        onSelectFile={(fileId) => onSelectFile(pane.id, fileId)}
-        onCloseFile={(fileId) => onCloseFile(pane.id, fileId)}
-        onReorder={(ids) => onReorderFiles(pane.id, ids)}
-        onPaneDragStart={onPaneDragStart}
-      />
+      {!hideTabs ? (
+        <SurfaceTabs
+          files={pane.files}
+          activeFileId={pane.activeFileId}
+          dirtyFileIds={dirtyFileIds}
+          fileErrorCounts={fileErrorCounts}
+          onSelectFile={(fileId) => onSelectFile(pane.id, fileId)}
+          onCloseFile={(fileId) => onCloseFile(pane.id, fileId)}
+          onReorder={(ids) => onReorderFiles(pane.id, ids)}
+          onPaneDragStart={onPaneDragStart}
+        />
+      ) : null}
       <div className="relative min-h-0 flex-1">
         {pane.files.map((file) => (
           <div
@@ -119,9 +134,10 @@ function FilePaneComponent({
   );
 }
 
-export const FilePane = memo(FilePaneComponent, (previous, next) => {
+const MemoFilePane = memo(FilePaneComponent, (previous, next) => {
   if (
     previous.pane !== next.pane ||
+    previous.hideTabs !== next.hideTabs ||
     previous.focused !== next.focused ||
     previous.dirtyFileIds !== next.dirtyFileIds ||
     previous.fileErrorCounts !== next.fileErrorCounts ||
@@ -150,6 +166,95 @@ export const FilePane = memo(FilePaneComponent, (previous, next) => {
   }
   return true;
 });
+
+type PaneHost = {
+  node: HTMLDivElement;
+  owner: object;
+  props: Props;
+  cleanup?: number;
+};
+type PaneRegistry = {
+  attach: (owner: object, slot: HTMLDivElement, props: Props) => () => void;
+};
+const PaneRegistryContext = createContext<PaneRegistry | null>(null);
+
+export function FilePaneProvider({ children }: { children: ReactNode }) {
+  const hosts = useRef(new Map<string, PaneHost>());
+  const [, refresh] = useState(0);
+  const registry = useMemo<PaneRegistry>(
+    () => ({
+      attach(owner, slot, props) {
+        const id = props.pane.id;
+        let host = hosts.current.get(id);
+        if (!host) {
+          const node = document.createElement("div");
+          node.className = "flex h-full min-h-0 min-w-0 flex-1 flex-col";
+          host = { node, owner, props };
+          hosts.current.set(id, host);
+        }
+        if (host.cleanup != null) cancelAnimationFrame(host.cleanup);
+        host.cleanup = undefined;
+        host.owner = owner;
+        host.props = props;
+        if (host.node.parentNode !== slot) slot.appendChild(host.node);
+        refresh((value) => value + 1);
+        return () => {
+          const current = hosts.current.get(id);
+          if (!current || current.owner !== owner) return;
+          current.cleanup = requestAnimationFrame(() => {
+            if (hosts.current.get(id)?.owner !== owner) return;
+            hosts.current.delete(id);
+            current.node.remove();
+            refresh((value) => value + 1);
+          });
+        };
+      },
+    }),
+    [],
+  );
+  useLayoutEffect(
+    () => () => {
+      for (const host of hosts.current.values())
+        if (host.cleanup != null) cancelAnimationFrame(host.cleanup);
+    },
+    [],
+  );
+  return (
+    <PaneRegistryContext.Provider value={registry}>
+      {children}
+      {[...hosts.current.entries()].map(([id, host]) =>
+        createPortal(<MemoFilePane {...host.props} />, host.node, id),
+      )}
+    </PaneRegistryContext.Provider>
+  );
+}
+
+function FilePaneSlot({
+  registry,
+  props,
+}: {
+  registry: PaneRegistry;
+  props: Props;
+}) {
+  const slot = useRef<HTMLDivElement>(null);
+  const owner = useRef({});
+  useLayoutEffect(() => {
+    if (!slot.current || props.present === false) return;
+    return registry.attach(owner.current, slot.current, props);
+  }, [registry, props]);
+  return (
+    <div ref={slot} className="flex h-full min-h-0 min-w-0 flex-1 flex-col" />
+  );
+}
+
+export function FilePane(props: Props) {
+  const registry = useContext(PaneRegistryContext);
+  return registry ? (
+    <FilePaneSlot registry={registry} props={props} />
+  ) : props.present === false ? null : (
+    <MemoFilePane {...props} />
+  );
+}
 
 function PlanSurface({
   file,

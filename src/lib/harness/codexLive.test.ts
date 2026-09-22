@@ -2,14 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sent: string[] = [];
 let onLine: ((line: string) => void) | undefined;
+let onExit: ((code: number | null) => void) | undefined;
+let onStderr: ((line: string) => void) | undefined;
 
 vi.mock("./child", () => ({
   resolveCodexBinary: async () => ({ path: "/fake/codex" }),
   spawnChild: async () => undefined,
   killChild: async () => undefined,
   unwatchChild: () => undefined,
-  watchChild: (_id: string, line: (l: string) => void) => {
+  watchChild: (
+    _id: string,
+    line: (l: string) => void,
+    exit: (code: number | null) => void,
+    stderr?: (line: string) => void,
+  ) => {
     onLine = line;
+    onExit = exit;
+    onStderr = stderr;
   },
   writeChild: async (_id: string, line: string) => {
     sent.push(line);
@@ -85,6 +94,8 @@ describe("codex live turn sequence", () => {
   beforeEach(() => {
     sent.length = 0;
     onLine = undefined;
+    onExit = undefined;
+    onStderr = undefined;
   });
 
   afterEach(async () => {
@@ -129,5 +140,32 @@ describe("codex live turn sequence", () => {
     });
     await turn;
     expect(settled).toBe(true);
+  });
+
+  it("reports immediate app-server stderr instead of a generic adapter error", async () => {
+    const events: HarnessEvent[] = [];
+    const turn = sendCodexTurn({
+      sessionId: "codex-live",
+      cwd: "/repo",
+      model: "codex:gpt-5.4",
+      modelSettings: {},
+      runtimeMode: "supervised",
+      text: "hello",
+      attachments: [],
+      onEvent: (event) => events.push(event),
+    });
+    const rejected = expect(turn).rejects.toThrow(
+      "Codex app-server exited (code 127): env: node: No such file or directory",
+    );
+
+    await waitFor(
+      () => parse().some((message) => message.method === "initialize"),
+      "initialize",
+    );
+    onStderr?.("env: node: No such file or directory");
+    onExit?.(127);
+
+    await rejected;
+    expect(events).toContainEqual({ type: "session.ended", code: 127 });
   });
 });

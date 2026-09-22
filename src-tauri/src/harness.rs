@@ -107,6 +107,14 @@ impl HarnessHost {
             .remove(session_id)
     }
 
+    fn remove_if_pid(&self, session_id: &str, pid: u32) -> Option<Arc<LiveChild>> {
+        let mut children = self.children.lock().unwrap_or_else(|e| e.into_inner());
+        if children.get(session_id).map(|live| live.pid) != Some(pid) {
+            return None;
+        }
+        children.remove(session_id)
+    }
+
     pub(crate) fn kill_all(&self) {
         let kids: Vec<Arc<LiveChild>> = {
             let mut map = self.children.lock().unwrap_or_else(|e| e.into_inner());
@@ -258,6 +266,9 @@ pub fn harness_spawn(
     args: Vec<String>,
     cwd: String,
 ) -> Result<u32, String> {
+    // A replacement OpenCode server must not inherit the previous generation's
+    // event stream. Stop it before the new child can publish its own SSE.
+    host.stop_sse(&session_id);
     if let Some(prev) = host.remove(&session_id) {
         terminate(prev.pid);
     }
@@ -337,18 +348,29 @@ pub fn harness_spawn(
     let wait_pid = pid;
     thread::spawn(move || {
         let code = child.wait().ok().and_then(|status| status.code());
-        if let Some(host) = wait_app.try_state::<HarnessHost>() {
-            host.stop_sse(&wait_id);
-            host.remove(&wait_id);
+        // A replacement child can reuse the session id before this wait
+        // thread observes the old process exit. Only the matching generation
+        // may remove the host entry, stop its SSE stream, or announce exit.
+        let emit = if let Some(host) = wait_app.try_state::<HarnessHost>() {
+            if host.remove_if_pid(&wait_id, wait_pid).is_some() {
+                host.stop_sse(&wait_id);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if emit {
+            let _ = wait_app.emit(
+                EXIT_EVENT,
+                HarnessExit {
+                    session_id: wait_id,
+                    code,
+                    pid: wait_pid,
+                },
+            );
         }
-        let _ = wait_app.emit(
-            EXIT_EVENT,
-            HarnessExit {
-                session_id: wait_id,
-                code,
-                pid: wait_pid,
-            },
-        );
     });
 
     Ok(pid)
@@ -755,6 +777,9 @@ fn resolve_codex() -> Option<PathBuf> {
     if let Some(from_shell) = which_via_login_shell("codex") {
         candidates.push(from_shell);
     }
+    if let Some(home) = &home {
+        candidates.extend(nvm_bin_candidates(home, "codex"));
+    }
 
     // Last resort: the Codex app bundles its own CLI, but never puts it on
     // PATH. It is pinned to the app release (often a prerelease), so a real
@@ -787,6 +812,9 @@ fn resolve_opencode() -> Option<PathBuf> {
     if let Some(from_shell) = which_via_login_shell("opencode") {
         candidates.push(from_shell);
     }
+    if let Some(home) = &home {
+        candidates.extend(nvm_bin_candidates(home, "opencode"));
+    }
 
     candidates.into_iter().find(|path| path.is_file())
 }
@@ -809,6 +837,9 @@ fn resolve_claude() -> Option<PathBuf> {
     candidates.push(PathBuf::from("/snap/bin/claude"));
     if let Some(from_shell) = which_via_login_shell("claude") {
         candidates.push(from_shell);
+    }
+    if let Some(home) = &home {
+        candidates.extend(nvm_bin_candidates(home, "claude"));
     }
 
     candidates.into_iter().find(|path| path.is_file())
@@ -838,6 +869,11 @@ fn resolve_pi() -> Option<PathBuf> {
     }
     if let Some(from_shell) = which_via_login_shell("pi") {
         candidates.push(from_shell);
+    }
+    if let Some(home) = &home {
+        for name in ["pi-coding-agent", "pi"] {
+            candidates.extend(nvm_bin_candidates(home, name));
+        }
     }
 
     candidates.into_iter().find(|path| is_pi_coding_agent(path))
@@ -1103,6 +1139,43 @@ fn is_executable_file(path: &Path) -> bool {
     }
 }
 
+/// Node version managers install global CLIs into per-version bin dirs
+/// (`~/.nvm/versions/node/<version>/bin`) that never appear on a
+/// Finder-launched app's PATH. Enumerate them, newest Node version first,
+/// as a fallback for the login-shell lookup — which misses when `.zshrc`
+/// lazy-loads nvm or does not answer within the probe timeout.
+fn nvm_bin_candidates(home: &Path, name: &str) -> Vec<PathBuf> {
+    let mut versions: Vec<((u32, u32, u32), PathBuf)> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(home.join(".nvm/versions/node")) else {
+        return Vec::new();
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let Some(version) = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(parse_node_version)
+        else {
+            continue;
+        };
+        let bin = dir.join("bin").join(name);
+        if is_executable_file(&bin) {
+            versions.push((version, bin));
+        }
+    }
+    versions.sort_by(|a, b| b.0.cmp(&a.0));
+    versions.into_iter().map(|(_, bin)| bin).collect()
+}
+
+fn parse_node_version(name: &str) -> Option<(u32, u32, u32)> {
+    let digits = name.strip_prefix('v')?;
+    let mut parts = digits.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    Some((major, minor, patch))
+}
+
 /// Resolve `name` the way a terminal would, then fall back to common install
 /// dirs. Finder-launched apps inherit launchd's PATH (`/usr/bin:/bin/…`), so
 /// Homebrew / mise / `~/.local/bin` tools look missing unless we search here.
@@ -1171,10 +1244,30 @@ pub(crate) fn apply_gui_env(cmd: &mut Command) {
 
 fn prepare_child(cmd: &mut Command, command: &str) {
     apply_gui_env(cmd);
+    // npm-installed CLIs commonly use `#!/usr/bin/env node`. A resolver may
+    // find the CLI in an nvm/mise/asdf version directory even when a
+    // Finder-launched app cannot recover that directory from the login shell.
+    // Put the resolved CLI's own bin directory first so its sibling runtime is
+    // available to the shebang and to any subprocesses the CLI launches.
+    cmd.env("PATH", command_search_path(command, &gui_search_path()));
     if command_basename(command) == "fx" {
         apply_fx_env(cmd);
     }
     isolate_child(cmd);
+}
+
+fn command_search_path(command: &str, base: &str) -> String {
+    let Some(parent) = Path::new(command).parent() else {
+        return base.to_string();
+    };
+    if parent.as_os_str().is_empty() {
+        return base.to_string();
+    }
+    let parent = parent.to_string_lossy();
+    if base.split(':').any(|entry| entry == parent) {
+        return base.to_string();
+    }
+    format!("{parent}:{base}")
 }
 
 /// fx keeps its Gateway credential in the macOS Keychain and reads it by
@@ -1349,7 +1442,7 @@ mod tests {
     fn which_in_path_takes_the_first_executable_hit() {
         use std::os::unix::fs::PermissionsExt;
 
-        let dir = std::env::temp_dir().join(format!("monocode-which-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-which-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (empty, unreadable, real) = (dir.join("a"), dir.join("b"), dir.join("c"));
         for sub in [&empty, &unreadable, &real] {
@@ -1397,7 +1490,7 @@ mod tests {
     fn resolve_gui_binary_finds_a_binary_on_the_gui_path() {
         use std::os::unix::fs::PermissionsExt;
 
-        let dir = std::env::temp_dir().join(format!("monocode-gui-bin-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-gui-bin-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let target = dir.join("gh");
@@ -1411,8 +1504,55 @@ mod tests {
     }
 
     #[test]
+    fn command_search_path_prepends_the_resolved_cli_bin() {
+        assert_eq!(
+            command_search_path(
+                "/Users/me/.nvm/versions/node/v24.12.0/bin/codex",
+                "/usr/bin:/bin"
+            ),
+            "/Users/me/.nvm/versions/node/v24.12.0/bin:/usr/bin:/bin"
+        );
+        assert_eq!(
+            command_search_path("/opt/homebrew/bin/codex", "/opt/homebrew/bin:/usr/bin"),
+            "/opt/homebrew/bin:/usr/bin"
+        );
+        assert_eq!(
+            command_search_path("codex", "/usr/bin:/bin"),
+            "/usr/bin:/bin"
+        );
+    }
+
+    #[test]
+    fn harness_host_keeps_a_replacement_child_on_stale_exit() {
+        let mut child = Command::new("sh")
+            .args(["-c", "cat"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let stdin = child.stdin.take().unwrap();
+        let host = HarnessHost::new();
+        host.insert(
+            "session".into(),
+            Arc::new(LiveChild {
+                stdin: Mutex::new(stdin),
+                pid,
+            }),
+        );
+
+        assert!(host
+            .remove_if_pid("session", pid.saturating_add(1))
+            .is_none());
+        assert!(host.get("session").is_some());
+        drop(host.remove_if_pid("session", pid));
+        assert!(host.get("session").is_none());
+        child.wait().unwrap();
+    }
+
+    #[test]
     fn cursor_agent_accepts_symlink_named_agent() {
-        let dir = std::env::temp_dir().join(format!("monocode-agent-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-agent-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("cursor-agent-pack")).unwrap();
         let target = dir.join("cursor-agent-pack/cursor-agent");
@@ -1426,7 +1566,7 @@ mod tests {
 
     #[test]
     fn pi_accepts_coding_agent_and_rejects_other_pi() {
-        let dir = std::env::temp_dir().join(format!("monocode-pi-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-pi-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -1454,7 +1594,7 @@ mod tests {
 
     #[test]
     fn omp_accepts_rpc_capable_binary_and_rejects_other_names() {
-        let dir = std::env::temp_dir().join(format!("monocode-omp-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-omp-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -1485,7 +1625,7 @@ mod tests {
 
     #[test]
     fn fx_accepts_vercel_agent_and_rejects_json_viewer() {
-        let dir = std::env::temp_dir().join(format!("monocode-fx-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-fx-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -1510,7 +1650,7 @@ mod tests {
     /// missed them and silently fell back to spawning `fx --help`.
     #[test]
     fn fx_marker_is_found_past_the_first_chunk() {
-        let dir = std::env::temp_dir().join(format!("monocode-fx-deep-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-fx-deep-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -1534,6 +1674,40 @@ mod tests {
     fn command_basename_strips_path() {
         assert_eq!(command_basename("/Users/me/.local/bin/fx"), "fx");
         assert_eq!(command_basename("fx"), "fx");
+    }
+
+    #[test]
+    fn nvm_candidates_list_newest_node_version_first() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("avenrail-nvm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for version in ["v18.20.0", "v24.12.0", "v9.11.2", "not-a-version"] {
+            let bin = dir.join(".nvm/versions/node").join(version).join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let cli = bin.join("codex");
+            std::fs::write(&cli, b"#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let found = nvm_bin_candidates(&dir, "codex");
+        assert_eq!(
+            found,
+            vec![
+                dir.join(".nvm/versions/node/v24.12.0/bin/codex"),
+                dir.join(".nvm/versions/node/v18.20.0/bin/codex"),
+                dir.join(".nvm/versions/node/v9.11.2/bin/codex"),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_node_version_reads_semver_only() {
+        assert_eq!(parse_node_version("v24.12.0"), Some((24, 12, 0)));
+        assert_eq!(parse_node_version("v0.1.2"), Some((0, 1, 2)));
+        assert_eq!(parse_node_version("24.12.0"), None);
+        assert_eq!(parse_node_version("system"), None);
     }
 
     #[test]

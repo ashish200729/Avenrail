@@ -5,6 +5,7 @@ type LinePayload = { sessionId: string; line: string };
 type ExitPayload = { sessionId: string; code: number | null; pid?: number };
 type SsePayload = { sessionId: string; data: string };
 type SseEndPayload = { sessionId: string; error?: string | null };
+type BufferedExit = { code: number | null; pid: number };
 
 type LineHandler = (line: string) => void;
 type ExitHandler = (code: number | null) => void;
@@ -19,6 +20,7 @@ const sseHandlers = new Map<string, SseHandler>();
 const sseEndHandlers = new Map<string, SseEndHandler>();
 const sseBuffer = new Map<string, string[]>();
 const livePid = new Map<string, number>();
+const bufferedExit = new Map<string, BufferedExit>();
 
 /** True when this exit belongs to the child we currently have spawned. */
 export function isCurrentChildExit(
@@ -66,7 +68,17 @@ function ensureBridge() {
     }),
     listen<ExitPayload>("harness-exit", (event) => {
       const { sessionId, code, pid } = event.payload;
-      if (!isCurrentChildExit(livePid.get(sessionId), pid)) return;
+      const expectedPid = livePid.get(sessionId);
+      if (expectedPid == null) {
+        // A very short-lived process can exit before the async spawn command
+        // returns its pid. Keep that exit until spawnChild can match it. Do
+        // not retain exits after a watcher has deliberately been removed.
+        if (pid != null && pid > 0 && exitHandlers.has(sessionId)) {
+          bufferedExit.set(sessionId, { code, pid });
+        }
+        return;
+      }
+      if (!isCurrentChildExit(expectedPid, pid)) return;
       livePid.delete(sessionId);
       exitHandlers.get(sessionId)?.(code);
     }),
@@ -97,6 +109,7 @@ function teardownBridge() {
   sseEndHandlers.clear();
   sseBuffer.clear();
   livePid.clear();
+  bufferedExit.clear();
   void pending?.then((fns) => fns.forEach((fn) => fn()));
 }
 
@@ -148,6 +161,7 @@ export function unwatchChild(sessionId: string) {
   exitHandlers.delete(sessionId);
   lineBuffer.delete(sessionId);
   stderrHandlers.delete(sessionId);
+  bufferedExit.delete(sessionId);
 }
 
 export function watchSse(
@@ -174,13 +188,24 @@ export async function spawnChild(
   args: string[],
   cwd: string,
 ): Promise<void> {
+  // While the native spawn is in flight, the previous pid is no longer the
+  // current generation. Otherwise its delayed exit can close the replacement
+  // adapter before the new pid reaches the renderer.
+  livePid.delete(sessionId);
+  bufferedExit.delete(sessionId);
   const pid = await invoke<number>("harness_spawn", {
     sessionId,
     command,
     args,
     cwd,
   });
-  if (typeof pid === "number" && pid > 0) livePid.set(sessionId, pid);
+  if (typeof pid !== "number" || pid <= 0) return;
+  livePid.set(sessionId, pid);
+  const early = bufferedExit.get(sessionId);
+  bufferedExit.delete(sessionId);
+  if (!early || early.pid !== pid) return;
+  livePid.delete(sessionId);
+  exitHandlers.get(sessionId)?.(early.code);
 }
 
 export function writeChild(sessionId: string, line: string): Promise<void> {
@@ -202,6 +227,7 @@ export function killAllChildren(): Promise<void> {
   sseEndHandlers.clear();
   sseBuffer.clear();
   livePid.clear();
+  bufferedExit.clear();
   return invoke("harness_kill_all");
 }
 

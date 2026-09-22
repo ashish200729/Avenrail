@@ -1,4 +1,4 @@
-import { Check, ChevronRight, Scale } from "lucide-react";
+import { Check, ChevronRight, MessagesSquare } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -261,17 +261,17 @@ export function SecondOpinionButton({ from, onPick }: Props) {
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
-        className={`rounded-md p-1 disabled:pointer-events-none disabled:opacity-40 ${
+        className={`grid size-7 shrink-0 place-items-center rounded-md focus-visible:outline-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40 ${
           open
             ? "bg-content/8 text-content/70"
-            : "text-content/40 hover:bg-content/8 hover:text-content/70"
+            : "text-content/55 hover:bg-content/8 hover:text-content"
         }`}
         onClick={() => {
           if (disabled) return;
           setOpen((value) => !value);
         }}
       >
-        <Scale className="size-3.5" strokeWidth={1.75} />
+        <MessagesSquare className="size-3.5" strokeWidth={1.75} aria-hidden />
       </button>
       {open
         ? createPortal(

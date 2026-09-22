@@ -133,7 +133,7 @@ describe("injectSkillPrompt", () => {
 });
 
 describe("mergeCatalog", () => {
-  it("lets .agents win, then MonoCode create-skill, then provider skills", () => {
+  it("lets .agents win, then Avenrail create-skill, then provider skills", () => {
     const catalog = mergeCatalog([
       {
         name: "review-pr",

@@ -1,3 +1,4 @@
+import { AppIdentity } from "../chrome/AppIdentity";
 import {
   ArrowDownCircle,
   Check,
@@ -31,7 +32,6 @@ import {
   loadBodyGlass,
   loadColorScheme,
   loadSidebarBlur,
-  loadSidebarLayout,
   loadSidebarOpacity,
   loadThemeHue,
   loadThemeSaturation,
@@ -40,7 +40,6 @@ import {
   saveBodyGlass,
   saveColorScheme,
   saveSidebarBlur,
-  saveSidebarLayout,
   saveSidebarOpacity,
   saveThemeHue,
   saveThemeSaturation,
@@ -60,7 +59,6 @@ import {
   THEME_SATURATION_MAX,
   THEME_SATURATION_MIN,
   type ColorScheme,
-  type SidebarLayout,
   type TranscriptLayout,
 } from "../lib/appearance";
 import {
@@ -250,7 +248,6 @@ export function SettingsView({
 }
 
 function GeneralPage() {
-  const [layout, setLayout] = useState<SidebarLayout>(loadSidebarLayout);
   const [transcriptLayout, setTranscriptLayout] = useState<TranscriptLayout>(
     loadTranscriptLayout,
   );
@@ -268,11 +265,6 @@ function GeneralPage() {
     return () =>
       window.removeEventListener(TRANSCRIPT_ZEN_CHANGE_EVENT, onChange);
   }, []);
-
-  const onLayout = (next: SidebarLayout) => {
-    saveSidebarLayout(next);
-    setLayout(next);
-  };
 
   const onTranscriptZen = (next: boolean) => {
     saveTranscriptZen(next);
@@ -306,20 +298,6 @@ function GeneralPage() {
 
   return (
     <>
-      <Row
-        label="Workspace layout"
-        description="Classic keeps a single sidebar. Deck adds the project rail, the workspace panel, and the project terminal dock."
-      >
-        <Segmented
-          label="Workspace layout"
-          value={layout}
-          options={[
-            { value: "deck", label: "Deck" },
-            { value: "classic", label: "Classic" },
-          ]}
-          onChange={onLayout}
-        />
-      </Row>
       <Row
         label="Transcript layout"
         description="Full width keeps user prompts as a spanning card. Chat aligns them to the right with a max width, like a messaging app."
@@ -389,6 +367,7 @@ function GeneralPage() {
       <LinearSettings />
 
       <Heading title="About" />
+      <div className="py-4"><AppIdentity /></div>
       <UpdateRow />
     </>
   );
@@ -591,7 +570,7 @@ function UpdateRow() {
             ? "You're on the latest version."
             : snapshot.phase === "error"
               ? (snapshot.error ?? "Update check failed.")
-              : "MonoCode updates itself from the release feed.";
+              : "Avenrail updates itself from the release feed.";
 
   return (
     <Row
@@ -706,7 +685,7 @@ function AppearancePage({ appearance }: { appearance: AppearanceSettings }) {
       </Row>
       <Row
         label="Sidebar opacity"
-        description="How much of the desktop shows through the sidebar and the project rail."
+        description="How much of the desktop shows through the project sidebar and workspace panel."
       >
         <Slider
           label="Sidebar opacity"

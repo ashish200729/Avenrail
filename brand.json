@@ -1,0 +1,8 @@
+{
+  "name": "Avenrail",
+  "slug": "avenrail",
+  "tagline": "Your agents. One workspace.",
+  "description": "A desktop workspace for your coding agents.",
+  "icon": "/avenrail.svg",
+  "legacyBundleIdentifier": "com.monocode.desktop"
+}

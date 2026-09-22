@@ -19,7 +19,7 @@ export async function generateOpenCodeSessionTitle(input: {
     });
     return parseGeneratedThreadTitle(output);
   } catch (error) {
-    console.debug("[monocode] session title", error);
+    console.debug("[avenrail] session title", error);
     return null;
   }
 }

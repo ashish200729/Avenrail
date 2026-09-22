@@ -1,6 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ChevronDown,
+  ChevronLeft,
   CircleDot,
   ExternalLink,
   GitPullRequest,
@@ -24,6 +25,7 @@ import {
 import { InboxProviderMark } from "../chrome/InboxProviderMark";
 import { ProjectLogoIcon } from "../chrome/ProjectLogoIcon";
 import { ProjectMascot } from "../chrome/ProjectMascot";
+import { IconButton } from "../chrome/TitleBar";
 import { WindowControls } from "../chrome/WindowControls";
 import { useDragResize } from "../hooks/useDragResize";
 import { useLockOverscroll } from "../hooks/useLockOverscroll";
@@ -611,6 +613,13 @@ export function InboxView({
       >
         {IS_MAC && !besideRail ? (
           <div className="w-[78px] shrink-0" data-tauri-drag-region />
+        ) : null}
+        {!besideRail && onClose ? (
+          <div className="pl-2">
+            <IconButton label="Back to workspace" onClick={onClose}>
+              <ChevronLeft className="size-3.5" strokeWidth={1.75} />
+            </IconButton>
+          </div>
         ) : null}
         <div
           className="flex min-w-0 flex-1 items-center gap-2 px-3 text-[13px]"

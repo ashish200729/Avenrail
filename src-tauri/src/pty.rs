@@ -223,7 +223,7 @@ fn spawn_unix(
         .env("TERM", "xterm-256color")
         .env("COLORTERM", "truecolor")
         .env("COLORFGBG", "15;0")
-        .env("TERM_PROGRAM", "MonoCode");
+        .env("TERM_PROGRAM", "Avenrail");
     apply_path(&mut cmd);
     if let Some(home) = dirs_home() {
         cmd.env("HOME", &home);
