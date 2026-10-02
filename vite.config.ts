@@ -11,8 +11,18 @@ export default defineConfig(async ({ mode }) => {
   return {
     plugins: [react(), tailwindcss()],
     clearScreen: false,
+    build: {
+      rollupOptions: {
+        // The quick composer panel loads its own page so it does not boot the
+        // whole workspace.
+        input: {
+          main: "index.html",
+          quickComposer: "quick-composer.html",
+        },
+      },
+    },
     server: {
-      port: 1420,
+      port: 1430,
       strictPort: true,
       host: host || false,
       hmr: stable
@@ -21,7 +31,7 @@ export default defineConfig(async ({ mode }) => {
           ? {
               protocol: "ws",
               host,
-              port: 1421,
+              port: 1431,
             }
           : undefined,
       watch: {

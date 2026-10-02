@@ -3,12 +3,14 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+#[cfg(not(windows))]
+use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dirs_home;
@@ -20,6 +22,15 @@ const STDERR_EVENT: &str = "harness-stderr";
 const EXIT_EVENT: &str = "harness-exit";
 const SSE_EVENT: &str = "harness-sse";
 const SSE_END_EVENT: &str = "harness-sse-end";
+
+const DEFAULT_PROVIDER_ACCOUNT_ID: &str = "default";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessAccount {
+    provider: String,
+    id: String,
+}
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -63,67 +74,185 @@ pub struct CursorBinary {
     pub path: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfiguredBinary {
+    pub path: String,
+    pub args: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AntigravityBinary {
+    pub path: String,
+    pub args: Vec<String>,
+}
+
+fn antigravity_args() -> Vec<String> {
+    if cfg!(target_os = "linux") {
+        vec!["--uid=".into()]
+    } else {
+        Vec::new()
+    }
+}
+
 struct LiveChild {
+    cwd: PathBuf,
     stdin: Mutex<ChildStdin>,
     pid: u32,
+    account: Option<HarnessAccount>,
 }
 
 struct LiveSse {
     stop: Arc<AtomicBool>,
 }
 
+struct HarnessInner {
+    children: HashMap<String, Arc<LiveChild>>,
+    epochs: HashMap<String, u64>,
+}
+
 pub struct HarnessHost {
-    children: Mutex<HashMap<String, Arc<LiveChild>>>,
+    inner: Mutex<HarnessInner>,
     sse: Mutex<HashMap<String, Arc<LiveSse>>>,
+    runtime_binary_paths: Mutex<Option<HashMap<String, String>>>,
+    /// Bumped by `kill_all` so a spawn that started before quit cannot reinsert.
+    kill_all_gen: AtomicU64,
 }
 
 impl HarnessHost {
+    pub(crate) fn runtime_binary_path(&self, provider: &str) -> Option<String> {
+        self.runtime_binary_paths
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()?
+            .get(provider)
+            .map(|path| path.trim().to_owned())
+            .filter(|path| !path.is_empty())
+    }
+
+    pub(crate) fn has_working_dir(&self, path: &Path) -> bool {
+        self.lock_inner()
+            .children
+            .values()
+            .any(|child| crate::worktrees::contains_working_dir(path, &child.cwd))
+    }
+
     pub fn new() -> Self {
         Self {
-            children: Mutex::new(HashMap::new()),
+            inner: Mutex::new(HarnessInner {
+                children: HashMap::new(),
+                epochs: HashMap::new(),
+            }),
             sse: Mutex::new(HashMap::new()),
+            runtime_binary_paths: Mutex::new(None),
+            kill_all_gen: AtomicU64::new(0),
         }
     }
 
-    fn insert(&self, session_id: String, live: Arc<LiveChild>) -> Option<Arc<LiveChild>> {
-        self.children
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(session_id, live)
+    fn lock_inner(&self) -> std::sync::MutexGuard<'_, HarnessInner> {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn get(&self, session_id: &str) -> Option<Arc<LiveChild>> {
-        self.children
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(session_id)
-            .cloned()
+        self.lock_inner().children.get(session_id).cloned()
     }
 
-    fn remove(&self, session_id: &str) -> Option<Arc<LiveChild>> {
-        self.children
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(session_id)
+    /// Stamp this spawn and drop any child already registered under the id.
+    fn begin_spawn(&self, session_id: &str) -> (u64, u64, Option<Arc<LiveChild>>) {
+        let mut inner = self.lock_inner();
+        let kill_all = self.kill_all_gen.load(Ordering::SeqCst);
+        let epoch = inner.epochs.entry(session_id.to_string()).or_insert(0);
+        *epoch += 1;
+        let epoch = *epoch;
+        let prev = inner.children.remove(session_id);
+        (epoch, kill_all, prev)
+    }
+
+    #[cfg(all(test, unix))]
+    fn spawn_stamp_current(&self, session_id: &str, epoch: u64, kill_all: u64) -> bool {
+        let inner = self.lock_inner();
+        self.kill_all_gen.load(Ordering::SeqCst) == kill_all
+            && inner.epochs.get(session_id) == Some(&epoch)
+    }
+
+    /// Keep the child only if nothing cancelled this spawn while it was forking.
+    fn install_spawn(
+        &self,
+        session_id: String,
+        epoch: u64,
+        kill_all: u64,
+        live: Arc<LiveChild>,
+    ) -> Option<Arc<LiveChild>> {
+        let mut inner = self.lock_inner();
+        if self.kill_all_gen.load(Ordering::SeqCst) != kill_all {
+            return Some(live);
+        }
+        if inner.epochs.get(&session_id) != Some(&epoch) {
+            return Some(live);
+        }
+        if let Some(prev) = inner.children.insert(session_id, live) {
+            terminate(prev.pid);
+        }
+        None
+    }
+
+    fn kill_session(&self, session_id: &str) -> Option<Arc<LiveChild>> {
+        let mut inner = self.lock_inner();
+        *inner.epochs.entry(session_id.to_string()).or_insert(0) += 1;
+        inner.children.remove(session_id)
     }
 
     fn remove_if_pid(&self, session_id: &str, pid: u32) -> Option<Arc<LiveChild>> {
-        let mut children = self.children.lock().unwrap_or_else(|e| e.into_inner());
-        if children.get(session_id).map(|live| live.pid) != Some(pid) {
+        let mut inner = self.lock_inner();
+        if inner.children.get(session_id).map(|live| live.pid) != Some(pid) {
             return None;
         }
-        children.remove(session_id)
+        inner.children.remove(session_id)
+    }
+
+    fn kill_account(&self, provider: &str, account_id: &str) {
+        let children: Vec<(String, Arc<LiveChild>)> = {
+            let mut inner = self.lock_inner();
+            let session_ids: Vec<String> = inner
+                .children
+                .iter()
+                .filter_map(|(session_id, live)| {
+                    let account = live.account.as_ref()?;
+                    (account.provider == provider && account.id == account_id)
+                        .then(|| session_id.clone())
+                })
+                .collect();
+            session_ids
+                .into_iter()
+                .filter_map(|session_id| {
+                    *inner.epochs.entry(session_id.clone()).or_insert(0) += 1;
+                    inner
+                        .children
+                        .remove(&session_id)
+                        .map(|child| (session_id, child))
+                })
+                .collect()
+        };
+        for (session_id, _) in &children {
+            self.stop_sse(session_id);
+        }
+        let pids: Vec<u32> = children.iter().map(|(_, child)| child.pid).collect();
+        drop(children);
+        terminate_all(&pids);
     }
 
     pub(crate) fn kill_all(&self) {
         let kids: Vec<Arc<LiveChild>> = {
-            let mut map = self.children.lock().unwrap_or_else(|e| e.into_inner());
-            map.drain().map(|(_, child)| child).collect()
+            let mut inner = self.lock_inner();
+            self.kill_all_gen.fetch_add(1, Ordering::SeqCst);
+            inner.children.drain().map(|(_, child)| child).collect()
         };
-        for live in kids {
-            terminate(live.pid);
-        }
         self.stop_all_sse();
+        let pids: Vec<u32> = kids.iter().map(|live| live.pid).collect();
+        // Drop stdin before signaling so ACP CLIs that watch the pipe can exit.
+        drop(kids);
+        terminate_all(&pids);
     }
 
     fn insert_sse(&self, session_id: String, live: Arc<LiveSse>) -> Option<Arc<LiveSse>> {
@@ -197,6 +326,38 @@ pub fn harness_resolve_opencode() -> Result<CursorBinary, String> {
         })
 }
 
+#[tauri::command(async)]
+pub fn harness_resolve_configured(
+    provider: String,
+    binary_path: String,
+) -> Result<ConfiguredBinary, String> {
+    resolve_harness_binary_override(&provider, &binary_path).map(|path| ConfiguredBinary {
+        path: path.to_string_lossy().into_owned(),
+        args: (provider == "antigravity").then(antigravity_args),
+    })
+}
+
+fn initialize_runtime_binary_paths(
+    runtime: &Mutex<Option<HashMap<String, String>>>,
+    paths: HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut runtime = runtime
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if runtime.is_none() {
+        *runtime = Some(paths);
+    }
+    runtime.clone().unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn harness_runtime_binary_paths(
+    host: State<'_, HarnessHost>,
+    paths: HashMap<String, String>,
+) -> HashMap<String, String> {
+    initialize_runtime_binary_paths(&host.runtime_binary_paths, paths)
+}
+
 /// Resolve the Claude Code CLI (`claude`).
 #[tauri::command(async)]
 pub fn harness_resolve_claude() -> Result<CursorBinary, String> {
@@ -208,6 +369,366 @@ pub fn harness_resolve_claude() -> Result<CursorBinary, String> {
             "Claude Code CLI not found. Install it from https://claude.com/product/claude-code and run `claude auth login`, then retry."
                 .into()
         })
+}
+
+fn resolve_mcp_binary(provider: &str, binary_path: Option<&str>) -> Result<PathBuf, String> {
+    if !matches!(provider, "claude" | "codex" | "cursor" | "opencode") {
+        return Err("Unsupported MCP provider".into());
+    }
+    match binary_path {
+        Some(path) => resolve_harness_binary_override(provider, path),
+        None => resolve_harness_binary_default(provider)
+            .ok_or_else(|| format!("{provider} CLI not found")),
+    }
+}
+
+fn claude_mcp_command(
+    args: Vec<String>,
+    cwd: String,
+    timeout: Duration,
+    binary_path: Option<&str>,
+) -> Result<String, String> {
+    let binary = resolve_mcp_binary("claude", binary_path)?;
+    mcp_command(binary, args, cwd, timeout)
+}
+
+fn mcp_command(
+    binary: PathBuf,
+    args: Vec<String>,
+    cwd: String,
+    timeout: Duration,
+) -> Result<String, String> {
+    let workdir = expand_home(&cwd);
+    if !workdir.is_dir() {
+        return Err("Project directory does not exist".into());
+    }
+    let output = exec_output(&binary.to_string_lossy(), &args, Some(&cwd), timeout)?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if output.status.success() {
+        return Ok(stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(format!("{} {}", stderr.trim(), stdout).trim().to_string())
+}
+
+#[tauri::command]
+pub async fn claude_mcp_list(host: State<'_, HarnessHost>, cwd: String) -> Result<String, String> {
+    let binary_path = host.runtime_binary_path("claude");
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut output = claude_mcp_command(
+            vec!["mcp".into(), "list".into()],
+            cwd.clone(),
+            Duration::from_secs(30),
+            binary_path.as_deref(),
+        )?;
+        for name in configured_ws_mcp_servers(&expand_home(&cwd)) {
+            if !output
+                .lines()
+                .any(|line| line.starts_with(&format!("{name}:")))
+            {
+                output.push_str(&format!(
+                    "\n{name}: WebSocket server (open Claude /mcp for status)"
+                ));
+            }
+        }
+        Ok(output)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn configured_ws_mcp_servers(cwd: &Path) -> Vec<String> {
+    let mut names = Vec::new();
+    let read = |path: &Path| -> Option<serde_json::Value> {
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+    };
+    let collect = |servers: Option<&serde_json::Value>, names: &mut Vec<String>| {
+        if let Some(servers) = servers.and_then(serde_json::Value::as_object) {
+            for (name, config) in servers {
+                if config.get("type").and_then(serde_json::Value::as_str) == Some("ws")
+                    && valid_mcp_name(name)
+                    && !names.contains(name)
+                {
+                    names.push(name.clone());
+                }
+            }
+        }
+    };
+    if let Some(home) = dirs_home() {
+        if let Some(settings) = read(&Path::new(&home).join(".claude.json")) {
+            collect(settings.get("mcpServers"), &mut names);
+            collect(
+                settings
+                    .get("projects")
+                    .and_then(|projects| projects.get(cwd.to_string_lossy().as_ref()))
+                    .and_then(|project| project.get("mcpServers")),
+                &mut names,
+            );
+        }
+    }
+    for directory in cwd.ancestors() {
+        if let Some(settings) = read(&directory.join(".mcp.json")) {
+            collect(settings.get("mcpServers"), &mut names);
+        }
+        if directory.join(".git").exists() {
+            break;
+        }
+    }
+    names
+}
+
+#[tauri::command]
+pub async fn claude_mcp_add(
+    host: State<'_, HarnessHost>,
+    cwd: String,
+    name: String,
+    config: String,
+    scope: String,
+) -> Result<(), String> {
+    if !valid_mcp_name(&name) {
+        return Err("Server name must use letters, numbers, hyphens, or underscores".into());
+    }
+    if !matches!(scope.as_str(), "local" | "project" | "user") {
+        return Err("Invalid MCP scope".into());
+    }
+    let value: serde_json::Value = serde_json::from_str(&config).map_err(|e| e.to_string())?;
+    if !value.is_object() {
+        return Err("Server configuration must be a JSON object".into());
+    }
+    let binary_path = host.runtime_binary_path("claude");
+    tauri::async_runtime::spawn_blocking(move || {
+        claude_mcp_command(
+            vec![
+                "mcp".into(),
+                "add-json".into(),
+                name,
+                config,
+                "--scope".into(),
+                scope,
+            ],
+            cwd,
+            Duration::from_secs(30),
+            binary_path.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(())
+}
+
+pub(crate) fn add_mcp_via_cli(
+    provider: &str,
+    scope: &str,
+    cwd: &str,
+    name: &str,
+    config: &serde_json::Value,
+    binary_path: Option<&str>,
+) -> Result<(), String> {
+    let (binary, args) = mcp_add_args(provider, scope, name, config, binary_path)?;
+    mcp_command(binary, args, cwd.to_owned(), Duration::from_secs(30))?;
+    Ok(())
+}
+
+pub(crate) fn opencode_major_version(cwd: &str, binary_path: Option<&str>) -> Result<u32, String> {
+    let binary = resolve_mcp_binary("opencode", binary_path)?;
+    let version = mcp_command(
+        binary,
+        vec!["--version".into()],
+        cwd.to_owned(),
+        Duration::from_secs(10),
+    )?;
+    version
+        .split_whitespace()
+        .find_map(|part| {
+            part.trim_start_matches('v')
+                .split('.')
+                .next()?
+                .parse::<u32>()
+                .ok()
+        })
+        .filter(|major| matches!(major, 1 | 2))
+        .ok_or_else(|| format!("Unsupported OpenCode version: {version}"))
+}
+
+fn mcp_add_args(
+    provider: &str,
+    scope: &str,
+    name: &str,
+    config: &serde_json::Value,
+    binary_path: Option<&str>,
+) -> Result<(PathBuf, Vec<String>), String> {
+    if provider == "claude" {
+        if !matches!(scope, "local" | "project" | "user") {
+            return Err("Invalid Claude MCP scope".into());
+        }
+        let binary = resolve_mcp_binary("claude", binary_path)?;
+        let config = serde_json::to_string(config).map_err(|e| e.to_string())?;
+        return Ok((
+            binary,
+            vec![
+                "mcp".into(),
+                "add-json".into(),
+                name.into(),
+                config,
+                "--scope".into(),
+                scope.into(),
+            ],
+        ));
+    }
+    if provider == "codex" && scope != "user" {
+        return Err("Codex CLI adds user-scoped servers only".into());
+    }
+    let binary = match provider {
+        "codex" => resolve_mcp_binary("codex", binary_path)?,
+        _ => return Err("Unsupported MCP provider".into()),
+    };
+    let object = config
+        .as_object()
+        .ok_or("Server configuration must be an object")?;
+    let remote = object.get("url").and_then(serde_json::Value::as_str);
+    let allowed: &[&str] = if remote.is_some() {
+        &["type", "url", "bearerTokenEnvVar"]
+    } else {
+        &["type", "command", "args", "env"]
+    };
+    if let Some(key) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+        return Err(format!(
+            "{provider} add cannot preserve '{key}'; edit its config file instead"
+        ));
+    }
+    let kind = object.get("type").and_then(serde_json::Value::as_str);
+    if remote.is_some() && !matches!(kind, None | Some("http") | Some("remote")) {
+        return Err(format!("{provider} CLI supports HTTP URLs only"));
+    }
+    if remote.is_none() && !matches!(kind, None | Some("stdio") | Some("local")) {
+        return Err("Local server type must be stdio".into());
+    }
+    let mut args = vec!["mcp".into(), "add".into(), name.into()];
+    if let Some(url) = remote {
+        let parsed = url::Url::parse(url).map_err(|_| "Invalid server URL")?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err("MCP URL must use HTTP or HTTPS".into());
+        }
+        args.extend(["--url".into(), url.into()]);
+        if let Some(var) = object
+            .get("bearerTokenEnvVar")
+            .and_then(serde_json::Value::as_str)
+        {
+            args.extend(["--bearer-token-env-var".into(), var.into()]);
+        }
+    } else {
+        args.extend(mcp_key_values(config, "env", "--env")?);
+        let command = object
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or("Local server needs a command")?;
+        let parameters = object
+            .get("args")
+            .map(|value| value.as_array().ok_or("args must be an array"))
+            .transpose()?;
+        args.push("--".into());
+        args.push(command.into());
+        for parameter in parameters.into_iter().flatten() {
+            args.push(
+                parameter
+                    .as_str()
+                    .ok_or("args must contain strings")?
+                    .into(),
+            );
+        }
+    }
+    Ok((binary, args))
+}
+
+fn mcp_key_values(
+    config: &serde_json::Value,
+    field: &str,
+    flag: &str,
+) -> Result<Vec<String>, String> {
+    let Some(value) = config.get(field) else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_object()
+        .ok_or_else(|| format!("{field} must be an object"))?;
+    let mut args = Vec::new();
+    for (key, value) in values {
+        let value = value
+            .as_str()
+            .ok_or_else(|| format!("{field} values must be strings"))?;
+        args.extend([flag.to_owned(), format!("{key}={value}")]);
+    }
+    Ok(args)
+}
+
+#[tauri::command]
+pub async fn claude_mcp_remove(
+    host: State<'_, HarnessHost>,
+    cwd: String,
+    name: String,
+    scope: String,
+) -> Result<(), String> {
+    if !valid_mcp_name(&name) {
+        return Err("Invalid MCP server name".into());
+    }
+    if !matches!(scope.as_str(), "local" | "project" | "user") {
+        return Err("Invalid MCP scope".into());
+    }
+    let binary_path = host.runtime_binary_path("claude");
+    tauri::async_runtime::spawn_blocking(move || {
+        claude_mcp_command(
+            vec!["mcp".into(), "remove".into(), name, "--scope".into(), scope],
+            cwd,
+            Duration::from_secs(30),
+            binary_path.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn mcp_provider_login(
+    host: State<'_, HarnessHost>,
+    cwd: String,
+    provider: String,
+    name: String,
+) -> Result<(), String> {
+    let valid_name = if provider == "opencode" {
+        !name.trim().is_empty() && !name.chars().any(char::is_control)
+    } else {
+        valid_mcp_name(&name)
+    };
+    if !valid_name {
+        return Err("Invalid MCP server name".into());
+    }
+    let binary_path = host.runtime_binary_path(&provider);
+    tauri::async_runtime::spawn_blocking(move || {
+        let args = match provider.as_str() {
+            "claude" | "codex" | "cursor" => vec!["mcp", "login"],
+            "opencode" => vec!["mcp", "auth"],
+            _ => return Err("Unsupported MCP provider".into()),
+        };
+        let binary = resolve_mcp_binary(&provider, binary_path.as_deref())?;
+        mcp_command(
+            binary,
+            args.into_iter().map(String::from).chain([name]).collect(),
+            cwd,
+            Duration::from_secs(180),
+        )?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn valid_mcp_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Resolve the Pi coding agent CLI (`pi`).
@@ -248,6 +769,44 @@ pub fn harness_resolve_fx() -> Result<CursorBinary, String> {
         })
 }
 
+/// Resolve xAI Grok Build (`grok`).
+#[tauri::command(async)]
+pub fn harness_resolve_grok() -> Result<CursorBinary, String> {
+    resolve_grok()
+        .map(|path| CursorBinary {
+            path: path.to_string_lossy().into_owned(),
+        })
+        .ok_or_else(|| {
+            "Grok Build CLI not found. Install it with `curl -fsSL https://x.ai/cli/install.sh | bash` and run `grok login`, then retry.".into()
+        })
+}
+
+/// Resolve Nous Research Hermes Agent (`hermes`).
+#[tauri::command(async)]
+pub fn harness_resolve_hermes() -> Result<CursorBinary, String> {
+    resolve_hermes()
+        .map(|path| CursorBinary {
+            path: path.to_string_lossy().into_owned(),
+        })
+        .ok_or_else(|| {
+            "Hermes Agent CLI not found. Install it from https://hermes-agent.nousresearch.com, run `hermes model`, then retry."
+                .into()
+        })
+}
+
+/// Antigravity's ACP server is separate from the interactive agy CLI.
+#[tauri::command(async)]
+pub fn harness_resolve_antigravity() -> Result<AntigravityBinary, String> {
+    resolve_antigravity()
+        .map(|path| AntigravityBinary {
+            path: path.to_string_lossy().into_owned(),
+            args: antigravity_args(),
+        })
+        .ok_or_else(|| {
+            "Antigravity ACP server (agy_acp_server.par) not found. Install Antigravity and run `agy` once in Terminal.".into()
+        })
+}
+
 /// Bind an ephemeral loopback port for `opencode serve`.
 #[tauri::command]
 pub fn harness_free_port() -> Result<u16, String> {
@@ -257,28 +816,38 @@ pub fn harness_free_port() -> Result<u16, String> {
         .map_err(|e| format!("Failed to reserve a local port: {e}"))
 }
 
-#[tauri::command]
+/// Off the main thread: fork/exec, and `apply_gui_env` can wait on the first
+/// login-shell read. Callers await this before writing to the child. Kill can
+/// still race the fork, so a cancelled spawn must not reinsert the child.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 pub fn harness_spawn(
     app: AppHandle,
-    host: State<HarnessHost>,
+    host: State<'_, HarnessHost>,
     session_id: String,
     command: String,
     args: Vec<String>,
     cwd: String,
+    account: Option<HarnessAccount>,
+    binary_provider: Option<String>,
+    binary_path: Option<String>,
 ) -> Result<u32, String> {
-    // A replacement OpenCode server must not inherit the previous generation's
-    // event stream. Stop it before the new child can publish its own SSE.
-    host.stop_sse(&session_id);
-    if let Some(prev) = host.remove(&session_id) {
-        terminate(prev.pid);
-    }
-
     let workdir = expand_home(&cwd);
     if !workdir.is_dir() {
         return Err(format!(
             "Working directory does not exist: {}",
             workdir.display()
         ));
+    }
+    if !is_resolved_harness_binary(&command, binary_provider.as_deref(), binary_path.as_deref()) {
+        return Err("harness_spawn: not a resolved harness CLI".to_string());
+    }
+
+    let _reservation = crate::worktree_lifecycle::reserve_spawn(&workdir)?;
+    host.stop_sse(&session_id);
+    let (epoch, kill_all, prev) = host.begin_spawn(&session_id);
+    if let Some(prev) = prev {
+        terminate(prev.pid);
     }
 
     let mut cmd = Command::new(&command);
@@ -288,10 +857,12 @@ pub fn harness_spawn(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     prepare_child(&mut cmd, &command);
+    apply_provider_account(&app, &mut cmd, account.as_ref())?;
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start {command}: {e}"))?;
+    crate::control::configure_child(&app, &session_id, &mut cmd);
+
+    let mut child =
+        spawn_managed(&mut cmd).map_err(|e| format!("Failed to start {command}: {e}"))?;
     let pid = child.id();
 
     let stdin = child
@@ -308,10 +879,22 @@ pub fn harness_spawn(
         .ok_or_else(|| "Failed to open harness stderr".to_string())?;
 
     let live = Arc::new(LiveChild {
+        cwd: workdir.clone(),
         stdin: Mutex::new(stdin),
         pid,
+        account,
     });
-    host.insert(session_id.clone(), live);
+    if let Some(rejected) = host.install_spawn(session_id.clone(), epoch, kill_all, live) {
+        // A kill, or a newer spawn, won the race while this one was forking.
+        // Returning `Ok` here would hand the caller a dead pid to store as the
+        // session's live child, and this child's stdout would be parsed as the
+        // stream that replaced it. Reap it without emitting anything.
+        terminate(rejected.pid);
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
+        return Err(SPAWN_CANCELLED.to_string());
+    }
 
     let stdout_app = app.clone();
     let stdout_id = session_id.clone();
@@ -376,34 +959,162 @@ pub fn harness_spawn(
     Ok(pid)
 }
 
+pub(crate) fn provider_account_dir(
+    app: &AppHandle,
+    provider: &str,
+    account_id: Option<&str>,
+) -> Result<Option<PathBuf>, String> {
+    let Some(account_id) = account_id.filter(|id| *id != DEFAULT_PROVIDER_ACCOUNT_ID) else {
+        return Ok(None);
+    };
+    let dir = provider_account_path(app, provider, account_id)?;
+    std::fs::create_dir_all(&dir).map_err(|error| {
+        format!(
+            "Could not create the {provider} account directory {}: {error}",
+            dir.display()
+        )
+    })?;
+    Ok(Some(dir))
+}
+
+pub(crate) fn provider_account_path(
+    app: &AppHandle,
+    provider: &str,
+    account_id: &str,
+) -> Result<PathBuf, String> {
+    if provider != "claude" && provider != "codex" {
+        return Err("Provider account profiles are not supported for this provider".into());
+    }
+    if account_id == DEFAULT_PROVIDER_ACCOUNT_ID {
+        return Err("The default provider account cannot be removed".into());
+    }
+    if account_id.is_empty()
+        || account_id.len() > 80
+        || !account_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err("Invalid provider account id".into());
+    }
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("provider-accounts")
+        .join(provider)
+        .join(account_id))
+}
+
+#[tauri::command(async)]
+pub fn provider_account_remove(
+    app: AppHandle,
+    host: State<'_, HarnessHost>,
+    provider: String,
+    account_id: String,
+) -> Result<(), String> {
+    let dir = provider_account_path(&app, &provider, &account_id)?;
+    host.kill_account(&provider, &account_id);
+
+    #[cfg(target_os = "macos")]
+    if provider == "claude" {
+        crate::rate_limits::delete_claude_keychain_credentials(&dir)?;
+    }
+
+    let metadata = match std::fs::symlink_metadata(&dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "Could not inspect the {provider} account directory {}: {error}",
+                dir.display()
+            ));
+        }
+    };
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        std::fs::remove_file(&dir)
+    } else {
+        std::fs::remove_dir_all(&dir)
+    }
+    .map_err(|error| {
+        format!(
+            "Could not remove the {provider} account directory {}: {error}",
+            dir.display()
+        )
+    })
+}
+
+fn apply_provider_account(
+    app: &AppHandle,
+    cmd: &mut Command,
+    account: Option<&HarnessAccount>,
+) -> Result<(), String> {
+    let Some(account) = account else {
+        return Ok(());
+    };
+    let Some(dir) = provider_account_dir(app, &account.provider, Some(&account.id))? else {
+        return Ok(());
+    };
+    match account.provider.as_str() {
+        "claude" => {
+            // Claude scopes both its ordinary config and its macOS Keychain
+            // credential to these exact strings. Setting both keeps profiles
+            // isolated on every supported platform.
+            cmd.env("CLAUDE_CONFIG_DIR", &dir)
+                .env("CLAUDE_SECURESTORAGE_CONFIG_DIR", &dir)
+                .env_remove("ANTHROPIC_API_KEY")
+                .env_remove("ANTHROPIC_AUTH_TOKEN")
+                .env_remove("CLAUDE_CODE_OAUTH_TOKEN");
+        }
+        "codex" => {
+            cmd.env("CODEX_HOME", &dir)
+                .env_remove("OPENAI_API_KEY")
+                .env_remove("CODEX_API_KEY")
+                .env_remove("CODEX_ACCESS_TOKEN");
+        }
+        _ => unreachable!("provider_account_dir validates the provider"),
+    }
+    Ok(())
+}
+
+/// A child that stops draining stdin can block `write_all` for minutes, so the
+/// write runs on the blocking pool — never on an async worker or the IPC path,
+/// where it would starve `harness_kill` and make the wedged child unrecoverable.
 #[tauri::command]
-pub fn harness_write(
-    host: State<HarnessHost>,
+pub async fn harness_write(
+    host: State<'_, HarnessHost>,
     session_id: String,
     line: String,
 ) -> Result<(), String> {
     let live = host
         .get(&session_id)
         .ok_or_else(|| "Harness process is not running".to_string())?;
-    let mut stdin = live.stdin.lock().unwrap_or_else(|e| e.into_inner());
-    stdin
-        .write_all(line.as_bytes())
-        .and_then(|_| stdin.write_all(b"\n"))
-        .and_then(|_| stdin.flush())
-        .map_err(|e| format!("Failed to write to harness: {e}"))
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut stdin = live.stdin.lock().unwrap_or_else(|e| e.into_inner());
+        stdin
+            .write_all(line.as_bytes())
+            .and_then(|_| stdin.write_all(b"\n"))
+            .and_then(|_| stdin.flush())
+            .map_err(|e| format!("Failed to write to harness: {e}"))
+    })
+    .await
+    .map_err(|e| format!("Harness write task failed: {e}"))?
 }
 
-#[tauri::command]
-pub fn harness_kill(host: State<HarnessHost>, session_id: String) -> Result<(), String> {
+/// `async` dispatch keeps kill executable while a sibling `harness_write` is
+/// blocked on a wedged child's stdin.
+#[tauri::command(async)]
+pub fn harness_kill(host: State<'_, HarnessHost>, session_id: String) -> Result<(), String> {
     host.stop_sse(&session_id);
-    if let Some(live) = host.remove(&session_id) {
+    if let Some(live) = host.kill_session(&session_id) {
         terminate(live.pid);
     }
     Ok(())
 }
 
-#[tauri::command]
-pub fn harness_kill_all(host: State<HarnessHost>) -> Result<(), String> {
+/// Off the main thread: `kill_all` waits for the children to die before it
+/// returns, and a window close calls this while the app keeps running.
+#[tauri::command(async)]
+pub fn harness_kill_all(host: State<'_, HarnessHost>) -> Result<(), String> {
     host.kill_all();
     Ok(())
 }
@@ -572,6 +1283,7 @@ const EXEC_ALLOWED_ARGS: &[&[&str]] = &[
     &["--list-models"],
     &["models", "--verbose"],
     &["models", "--json"],
+    &["models"],
     &["status", "--json"],
     &["agent", "list"],
 ];
@@ -584,20 +1296,20 @@ fn exec_args_allowed(args: &[String]) -> bool {
 
 /// Must be a path a resolver would hand back, not an arbitrary binary
 /// that merely shares a file name.
-fn is_resolved_harness_binary(command: &str) -> bool {
-    let path = PathBuf::from(command);
-    [
-        resolve_cursor_agent(),
-        resolve_codex(),
-        resolve_opencode(),
-        resolve_claude(),
-        resolve_pi(),
-        resolve_omp(),
-        resolve_fx(),
-    ]
-    .into_iter()
-    .flatten()
-    .any(|resolved| resolved == path)
+pub(crate) fn is_resolved_harness_binary(
+    command: &str,
+    binary_provider: Option<&str>,
+    binary_path: Option<&str>,
+) -> bool {
+    let Some(provider) = binary_provider else {
+        return false;
+    };
+    let resolved = match binary_path {
+        Some(binary_path) => resolve_harness_binary_override(provider, binary_path),
+        None => resolve_harness_binary_default(provider)
+            .ok_or_else(|| format!("Unsupported configured harness provider: {provider}")),
+    };
+    resolved.is_ok_and(|path| path == Path::new(command))
 }
 
 /// One-shot capture of stdout (used for `cursor-agent --list-models`).
@@ -606,12 +1318,15 @@ pub async fn harness_exec(
     command: String,
     args: Vec<String>,
     cwd: Option<String>,
+    binary_provider: Option<String>,
+    binary_path: Option<String>,
 ) -> Result<String, String> {
     if !exec_args_allowed(&args) {
         return Err("harness_exec: unsupported arguments".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        if !is_resolved_harness_binary(&command) {
+        if !is_resolved_harness_binary(&command, binary_provider.as_deref(), binary_path.as_deref())
+        {
             return Err("harness_exec: not a resolved harness CLI".to_string());
         }
         exec_capture(&command, &args, cwd.as_deref())
@@ -621,6 +1336,23 @@ pub async fn harness_exec(
 }
 
 fn exec_capture(command: &str, args: &[String], cwd: Option<&str>) -> Result<String, String> {
+    let output = exec_output(command, args, cwd, EXEC_TIMEOUT)?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    if output.status.success() || !stdout.trim().is_empty() {
+        return Ok(stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(stderr.trim().to_string())
+}
+
+const EXEC_TIMEOUT: Duration = Duration::from_secs(15);
+
+pub(crate) fn exec_output(
+    command: &str,
+    args: &[String],
+    cwd: Option<&str>,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
     let mut cmd = Command::new(command);
     cmd.args(args)
         .stdin(Stdio::null())
@@ -634,24 +1366,15 @@ fn exec_capture(command: &str, args: &[String], cwd: Option<&str>) -> Result<Str
         }
     }
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to run {command}: {e}"))?;
+    let child = spawn_managed(&mut cmd).map_err(|e| format!("Failed to run {command}: {e}"))?;
     let pid = child.id();
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let _ = tx.send(child.wait_with_output());
     });
 
-    match rx.recv_timeout(Duration::from_secs(15)) {
-        Ok(Ok(output)) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            if output.status.success() || !stdout.trim().is_empty() {
-                return Ok(stdout);
-            }
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(stderr.trim().to_string())
-        }
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) => Ok(output),
         Ok(Err(e)) => Err(format!("Failed to run {command}: {e}")),
         Err(_) => {
             terminate(pid);
@@ -661,21 +1384,83 @@ fn exec_capture(command: &str, args: &[String], cwd: Option<&str>) -> Result<Str
 }
 
 const KILL_ESCALATE: Duration = Duration::from_secs(2);
+/// Quit and `Drop` cannot wait on a detached escalate thread — the process
+/// exits first and isolated harness groups stay behind as PID-1 orphans.
+#[cfg(not(windows))]
+const KILL_ALL_GRACE: Duration = Duration::from_millis(300);
+#[cfg(not(windows))]
+const KILL_ALL_KILL_WAIT: Duration = Duration::from_millis(150);
+const HARNESS_PARENT_ENV: &str = "MONOCODE_HARNESS_PARENT";
 
 /// An interactive shell has to source the user's whole rc file; nvm alone can
 /// take a second.
+#[cfg(not(windows))]
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// A spawn that was cancelled mid-fork. The session it was starting is already
+/// gone or already replaced, so callers must not register this child.
+const SPAWN_CANCELLED: &str = "Harness start was cancelled";
+
+/// Its own process group, so one signal reaches the whole tree, plus the
+/// marker a later launch reads to recognise what this run left behind. Every
+/// harness spawn goes through here, probes included: a `--help` probe that
+/// hangs is a `node` process too, and an unmarked one is unreapable.
 fn isolate_child(cmd: &mut Command) {
+    cmd.env(HARNESS_PARENT_ENV, std::process::id().to_string());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = cmd;
     }
+}
+
+fn spawn_managed(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    #[cfg(windows)]
+    {
+        crate::windows::spawn_managed(cmd)
+    }
+    #[cfg(unix)]
+    {
+        spawn_retrying_text_file_busy(cmd)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        cmd.spawn()
+    }
+}
+
+/// Linux refuses to `execve` a file that any process holds open for writing,
+/// and whether one does is not ours to decide: a sibling thread's spawn
+/// inherits our write handles for the moment before it execs its own program.
+/// So a binary written seconds ago — a CLI mid-upgrade, or a `--version` probe
+/// of a path the user just pointed us at — can be briefly unrunnable rather
+/// than wrong, and reporting it as invalid is the wrong answer.
+#[cfg(unix)]
+fn spawn_retrying_text_file_busy(cmd: &mut Command) -> std::io::Result<std::process::Child> {
+    const ATTEMPTS: u32 = 4;
+    for attempt in 1..ATTEMPTS {
+        match cmd.spawn() {
+            Err(e) if is_text_file_busy(&e) => thread::sleep(Duration::from_millis(20) * attempt),
+            settled => return settled,
+        }
+    }
+    cmd.spawn()
+}
+
+#[cfg(unix)]
+fn is_text_file_busy(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(libc::ETXTBSY)
 }
 
 fn terminate(pid: u32) {
@@ -686,16 +1471,70 @@ fn terminate_after(pid: u32, escalate: Duration) {
     if pid == 0 || pid == 1 {
         return;
     }
-    signal_tree(pid, TreeSignal::Term);
-    thread::spawn(move || {
-        thread::sleep(escalate);
-        if tree_alive(pid) {
-            signal_tree(pid, TreeSignal::Kill);
+    #[cfg(windows)]
+    {
+        let _ = escalate;
+        signal_tree(pid, TreeSignal::Kill);
+    }
+    #[cfg(not(windows))]
+    {
+        signal_tree(pid, TreeSignal::Term);
+        thread::spawn(move || {
+            thread::sleep(escalate);
+            if tree_alive(pid) {
+                signal_tree(pid, TreeSignal::Kill);
+            }
+        });
+    }
+}
+
+/// SIGTERM every tree, then SIGKILL whatever is still standing, before return.
+pub(crate) fn terminate_all(pids: &[u32]) {
+    let pids: Vec<u32> = pids.iter().copied().filter(|pid| *pid > 1).collect();
+    #[cfg(windows)]
+    for pid in pids {
+        signal_tree(pid, TreeSignal::Kill);
+    }
+    #[cfg(not(windows))]
+    {
+        if pids.is_empty() {
+            return;
         }
-    });
+        for pid in &pids {
+            signal_tree(*pid, TreeSignal::Term);
+        }
+        wait_until_dead(&pids, Instant::now() + KILL_ALL_GRACE);
+        let remaining: Vec<u32> = pids
+            .iter()
+            .copied()
+            .filter(|pid| tree_alive(*pid))
+            .collect();
+        if remaining.is_empty() {
+            return;
+        }
+        for pid in &remaining {
+            signal_tree(*pid, TreeSignal::Kill);
+        }
+        wait_until_dead(&remaining, Instant::now() + KILL_ALL_KILL_WAIT);
+    }
+}
+
+/// The thread that owns each `Child` reaps it, so a killed leader stops
+/// answering `kill(pid, 0)` within a poll or two. Reaping here instead would
+/// race that thread for the exit status and free the pid while we still signal
+/// it.
+#[cfg(not(windows))]
+fn wait_until_dead(pids: &[u32], until: Instant) {
+    while Instant::now() < until {
+        if pids.iter().all(|pid| !tree_alive(*pid)) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 enum TreeSignal {
+    #[cfg(not(windows))]
     Term,
     Kill,
 }
@@ -717,13 +1556,24 @@ fn signal_tree(pid: u32, signal: TreeSignal) {
             libc::kill(ipid, sig);
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let _ = signal;
+        let mut cmd = Command::new("taskkill");
+        crate::hide_window_console(&mut cmd);
+        cmd.args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let _ = cmd.status();
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = signal;
         let _ = Command::new("kill").arg(pid.to_string()).status();
     }
 }
 
+#[cfg(not(windows))]
 fn tree_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
@@ -735,6 +1585,311 @@ fn tree_alive(pid: u32) -> bool {
         let _ = pid;
         false
     }
+}
+
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+#[cfg(any(unix, test))]
+#[derive(Debug, Clone)]
+struct ProcessSnapshot {
+    pid: u32,
+    ppid: u32,
+    args: String,
+    harness_parent: Option<u32>,
+}
+
+/// Kill harness trees left behind by a previous Avenrail that exited
+/// before SIGKILL ran (crash, force-quit, or the detached escalate thread).
+/// Off-thread: the sweep shells out to `ps` and then waits on a SIGKILL, and
+/// launch would otherwise hold the first window for both. Nothing this run
+/// spawns can be caught by it — our own children carry our pid as the marker.
+pub(crate) fn reap_orphaned_harness_processes() {
+    #[cfg(unix)]
+    {
+        let our_pid = std::process::id();
+        thread::spawn(move || reap_snapshots(&snapshot_processes(), our_pid));
+    }
+}
+
+#[cfg(unix)]
+fn reap_snapshots(rows: &[ProcessSnapshot], our_pid: u32) {
+    let pids: Vec<u32> = rows
+        .iter()
+        .filter(|row| should_reap_process(row, our_pid, process_alive))
+        .map(|row| row.pid)
+        .collect();
+    terminate_all(&pids);
+}
+
+#[cfg(any(unix, test))]
+fn should_reap_process(
+    proc: &ProcessSnapshot,
+    our_pid: u32,
+    parent_alive: impl Fn(u32) -> bool,
+) -> bool {
+    if proc.pid == our_pid || proc.pid <= 1 || proc.ppid == our_pid {
+        return false;
+    }
+    if let Some(parent) = proc.harness_parent {
+        return looks_like_harness_argv(&proc.args) && parent != our_pid && !parent_alive(parent);
+    }
+    proc.ppid == 1 && is_legacy_orphaned_cursor_acp(&proc.args)
+}
+
+/// Pre-marker leftovers: `cursor-agent acp` reparented to launchd.
+#[cfg(any(unix, test))]
+fn is_legacy_orphaned_cursor_acp(args: &str) -> bool {
+    if !args.contains("cursor-agent") {
+        return false;
+    }
+    args.split_whitespace().any(|part| part == "acp")
+}
+
+/// Argv of an agent CLI we spawned — not a shell, tmux, or `npm start`.
+/// Used to decide whose environment is worth opening; the marker still
+/// decides what actually dies.
+#[cfg(any(unix, test))]
+fn looks_like_harness_argv(args: &str) -> bool {
+    if is_legacy_orphaned_cursor_acp(args) {
+        return true;
+    }
+    args.split_whitespace().any(is_harness_argv_token)
+}
+
+#[cfg(any(unix, test))]
+fn is_harness_argv_token(part: &str) -> bool {
+    let name = Path::new(part)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(part);
+    matches!(
+        name,
+        "cursor-agent"
+            | "pi-coding-agent"
+            | "claude"
+            | "codex"
+            | "opencode"
+            | "grok"
+            | "omp"
+            | "fx"
+            | "hermes"
+            | "agy_acp_server.par"
+            | "pi"
+            | "worker-server"
+            | "app-server"
+    )
+}
+
+#[cfg(any(all(unix, not(target_os = "linux")), test))]
+fn parse_ps_row(line: &str) -> Option<ProcessSnapshot> {
+    let s = line.trim();
+    let pid_end = s.find(char::is_whitespace)?;
+    let pid: u32 = s[..pid_end].parse().ok()?;
+    let rest = s[pid_end..].trim_start();
+    let ppid_end = rest.find(char::is_whitespace)?;
+    let ppid: u32 = rest[..ppid_end].parse().ok()?;
+    let args = rest[ppid_end..].trim_start();
+    if args.is_empty() {
+        return None;
+    }
+    Some(ProcessSnapshot {
+        pid,
+        ppid,
+        args: args.to_string(),
+        harness_parent: harness_parent_from_bytes(args.as_bytes()),
+    })
+}
+
+#[cfg(any(unix, test))]
+fn harness_parent_from_bytes(buf: &[u8]) -> Option<u32> {
+    let mut needle = Vec::with_capacity(HARNESS_PARENT_ENV.len() + 1);
+    needle.extend_from_slice(HARNESS_PARENT_ENV.as_bytes());
+    needle.push(b'=');
+    let pos = buf
+        .windows(needle.len())
+        .position(|chunk| chunk == needle)?;
+    let start = pos + needle.len();
+    let digits = buf[start..]
+        .iter()
+        .take_while(|b| b.is_ascii_digit())
+        .count();
+    std::str::from_utf8(&buf[start..start + digits])
+        .ok()?
+        .parse()
+        .ok()
+}
+
+/// List processes by argv, then open environ only for agent CLIs. Linux
+/// orphans sit under `systemd --user`, not pid 1, so the marker (not ppid)
+/// is what identifies them.
+#[cfg(unix)]
+fn snapshot_processes() -> Vec<ProcessSnapshot> {
+    #[cfg(target_os = "linux")]
+    {
+        snapshot_from_proc()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        snapshot_from_ps()
+    }
+}
+
+/// `ps -E`/`-e` dumps every process environment; skip that. List argv only,
+/// then open environ for agent CLIs. Linux orphans sit under `systemd --user`,
+/// not pid 1, so the marker (not ppid) is what identifies them.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn snapshot_from_ps() -> Vec<ProcessSnapshot> {
+    let mut cmd = Command::new("ps");
+    #[cfg(target_os = "macos")]
+    {
+        cmd.args(["-axww", "-o", "pid=", "-o", "ppid=", "-o", "command="]);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        cmd.args(["-axww", "-o", "pid=", "-o", "ppid=", "-o", "args="]);
+    }
+    let Ok(output) = cmd.output() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<ProcessSnapshot> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(parse_ps_row)
+        .collect();
+    attach_markers_from_env(&mut rows);
+    rows
+}
+
+#[cfg(target_os = "linux")]
+fn snapshot_from_proc() -> Vec<ProcessSnapshot> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut rows: Vec<ProcessSnapshot> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
+            let dir = entry.path();
+            let cmdline = std::fs::read(dir.join("cmdline")).ok()?;
+            if cmdline.is_empty() {
+                return None;
+            }
+            Some(ProcessSnapshot {
+                pid,
+                ppid: proc_ppid(&dir)?,
+                args: String::from_utf8_lossy(&cmdline).replace('\0', " "),
+                harness_parent: None,
+            })
+        })
+        .collect();
+    attach_markers_from_env(&mut rows);
+    rows
+}
+
+#[cfg(unix)]
+fn attach_markers_from_env(rows: &mut [ProcessSnapshot]) {
+    let pids: Vec<u32> = rows
+        .iter()
+        .filter(|row| row.harness_parent.is_none() && looks_like_harness_argv(&row.args))
+        .map(|row| row.pid)
+        .collect();
+    if pids.is_empty() {
+        return;
+    }
+    let parents = read_harness_parents(&pids);
+    for row in rows {
+        if row.harness_parent.is_some() {
+            continue;
+        }
+        if let Some(parent) = parents.get(&row.pid).copied() {
+            row.harness_parent = Some(parent);
+        }
+    }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn read_harness_parents(pids: &[u32]) -> HashMap<u32, u32> {
+    let mut found = HashMap::new();
+    if pids.is_empty() {
+        return found;
+    }
+    let list = pids
+        .iter()
+        .map(|pid| pid.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut cmd = Command::new("ps");
+    #[cfg(target_os = "macos")]
+    {
+        cmd.args(["-Eww", "-p", &list, "-o", "pid=", "-o", "command="]);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        cmd.args(["-eww", "-p", &list, "-o", "pid=", "-o", "args="]);
+    }
+    let Ok(output) = cmd.output() else {
+        return found;
+    };
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some((pid, command)) = parse_ps_pid_command(line) else {
+            continue;
+        };
+        if let Some(parent) = harness_parent_from_bytes(command.as_bytes()) {
+            found.insert(pid, parent);
+        }
+    }
+    found
+}
+
+#[cfg(any(all(unix, not(target_os = "linux")), test))]
+fn parse_ps_pid_command(line: &str) -> Option<(u32, String)> {
+    let s = line.trim();
+    let pid_end = s.find(char::is_whitespace)?;
+    let pid: u32 = s[..pid_end].parse().ok()?;
+    let command = s[pid_end..].trim_start();
+    if command.is_empty() {
+        return None;
+    }
+    Some((pid, command.to_string()))
+}
+
+#[cfg(target_os = "linux")]
+fn read_harness_parents(pids: &[u32]) -> HashMap<u32, u32> {
+    pids.iter()
+        .filter_map(|pid| {
+            let buf = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+            Some((*pid, harness_parent_from_bytes(&buf)?))
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn proc_ppid(dir: &Path) -> Option<u32> {
+    parse_proc_ppid(&std::fs::read_to_string(dir.join("stat")).ok()?)
+}
+
+/// Field 4 of `stat`, counted from the last closing paren: `comm` is unquoted
+/// and can hold spaces and parens of its own.
+#[cfg(any(target_os = "linux", test))]
+fn parse_proc_ppid(stat: &str) -> Option<u32> {
+    stat.get(stat.rfind(')')? + 1..)?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
 }
 
 fn resolve_cursor_agent() -> Option<PathBuf> {
@@ -757,7 +1912,199 @@ fn resolve_cursor_agent() -> Option<PathBuf> {
         candidates.push(from_shell);
     }
 
-    candidates.into_iter().find(|path| is_cursor_agent(path))
+    first_binary_matching(candidates, is_cursor_agent)
+}
+
+fn resolve_harness_binary_default(provider: &str) -> Option<PathBuf> {
+    match provider {
+        "claude" => resolve_claude(),
+        "codex" => resolve_codex(),
+        "cursor" => resolve_cursor_agent(),
+        "grok" => resolve_grok(),
+        "opencode" => resolve_opencode(),
+        "pi" => resolve_pi(),
+        "omp" => resolve_omp(),
+        "fx" => resolve_fx(),
+        "hermes" => resolve_hermes(),
+        "antigravity" => resolve_antigravity(),
+        _ => None,
+    }
+}
+
+const MAX_CONFIGURED_BINARY_VALIDATIONS: usize = 32;
+type ConfiguredBinaryValidation = (String, PathBuf);
+type ConfiguredBinaryValidationCache = HashMap<(String, String), ConfiguredBinaryValidation>;
+
+static CONFIGURED_BINARY_VALIDATIONS: OnceLock<Mutex<ConfiguredBinaryValidationCache>> =
+    OnceLock::new();
+
+fn configured_binary_fingerprint(path: &Path) -> Option<String> {
+    let metadata = std::fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(format!(
+            "{}:{}:{}:{:?}",
+            metadata.len(),
+            metadata.dev(),
+            metadata.ino(),
+            metadata.modified().ok()
+        ))
+    }
+    #[cfg(not(unix))]
+    {
+        Some(format!("{}:{:?}", metadata.len(), metadata.modified().ok()))
+    }
+}
+
+fn resolve_harness_binary_override(provider: &str, binary_path: &str) -> Result<PathBuf, String> {
+    if provider == "antigravity" && cfg!(windows) {
+        return Err("Antigravity ACP server overrides are not supported on Windows.".into());
+    }
+    let names: &[&str] = match provider {
+        "claude" => &["claude"],
+        "codex" => &["codex"],
+        "cursor" => &["cursor-agent", "agent"],
+        "grok" => &["grok"],
+        "opencode" => &["opencode"],
+        "pi" => &["pi", "pi-coding-agent"],
+        "omp" => &["omp"],
+        "fx" => &["fx"],
+        "hermes" => &["hermes"],
+        "antigravity" => &["agy_acp_server.par"],
+        _ => {
+            return Err(format!(
+                "Unsupported configured harness provider: {provider}"
+            ))
+        }
+    };
+    let path = resolve_configured_harness_binary(binary_path, provider, names)?;
+    let fingerprint = configured_binary_fingerprint(&path);
+    let key = (provider.to_string(), binary_path.to_string());
+    let cache = CONFIGURED_BINARY_VALIDATIONS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(fingerprint) = fingerprint.as_deref() {
+        if let Ok(cache) = cache.lock() {
+            if cache
+                .get(&key)
+                .is_some_and(|(cached, _)| Some(cached.as_str()) == Some(fingerprint))
+            {
+                return Ok(path);
+            }
+        }
+    }
+    validate_configured_harness_binary_identity(provider, &path, binary_path)?;
+    validate_harness_binary_version(provider, &path)?;
+    if let Some(fingerprint) = fingerprint {
+        if let Ok(mut cache) = cache.lock() {
+            if cache.len() >= MAX_CONFIGURED_BINARY_VALIDATIONS {
+                if let Some(oldest) = cache.keys().next().cloned() {
+                    cache.remove(&oldest);
+                }
+            }
+            cache.insert(key, (fingerprint, path.clone()));
+        }
+    }
+    Ok(path)
+}
+
+fn is_supported_harness_version(version: &str) -> bool {
+    version.split_whitespace().any(|token| {
+        let token = token
+            .strip_prefix('v')
+            .or_else(|| token.strip_prefix('V'))
+            .unwrap_or(token);
+        let (version, build) = match token.split_once('-') {
+            Some((version, build)) => (version, Some(build)),
+            None => (token, None),
+        };
+        let mut parts = version.split('.');
+        let digits = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit());
+        let valid = parts.next().is_some_and(digits)
+            && parts.next().is_some_and(digits)
+            && parts.next().is_some_and(digits)
+            && parts.next().is_none();
+        let valid_build = build.is_none_or(|build| {
+            !build.is_empty()
+                && build
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
+        });
+        valid && valid_build
+    })
+}
+
+fn validate_harness_binary_version(provider: &str, path: &Path) -> Result<(), String> {
+    if provider == "antigravity" {
+        return Ok(());
+    }
+    let version = exec_capture(&path.to_string_lossy(), &["--version".to_string()], None)?;
+    let lower = version.to_ascii_lowercase();
+    let has_version = is_supported_harness_version(&version);
+    let provider_marker = match provider {
+        "claude" => lower.contains("claude"),
+        "codex" => lower.contains("codex"),
+        "hermes" => lower.contains("hermes"),
+        _ => true,
+    };
+    if has_version && provider_marker {
+        Ok(())
+    } else {
+        Err(format!(
+            "Configured {provider} binary returned an invalid version."
+        ))
+    }
+}
+
+fn resolve_configured_harness_binary(
+    binary_path: &str,
+    provider: &str,
+    names: &[&str],
+) -> Result<PathBuf, String> {
+    let binary_path = binary_path.trim();
+    if binary_path.is_empty() {
+        return Err(format!("Configured {provider} binary path is empty."));
+    }
+    if binary_path.contains('\0') {
+        return Err(format!("Invalid configured {provider} binary path."));
+    }
+    if !Path::new(binary_path).is_absolute() {
+        return Err(format!(
+            "Configured {provider} binary path must be absolute."
+        ));
+    }
+    let path = existing_binary(expand_home(binary_path))
+        .ok_or_else(|| format!("Configured {provider} binary is not executable: {binary_path}"))?;
+    if !names
+        .iter()
+        .any(|name| configured_binary_name_eq(&path, name))
+    {
+        return Err(format!(
+            "Configured path is not a {provider} binary: {binary_path}"
+        ));
+    }
+    Ok(path)
+}
+
+fn validate_configured_harness_binary_identity(
+    provider: &str,
+    path: &Path,
+    binary_path: &str,
+) -> Result<(), String> {
+    let identity_valid = match provider {
+        "cursor" => is_cursor_agent(path),
+        "pi" => is_pi_coding_agent(path),
+        "omp" => is_omp_agent(path),
+        "fx" => is_fx_agent(path),
+        "grok" => is_grok_agent(path),
+        _ => true,
+    };
+    if identity_valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "Configured path is not a valid {provider} binary: {binary_path}"
+        ))
+    }
 }
 
 fn resolve_codex() -> Option<PathBuf> {
@@ -766,6 +2113,7 @@ fn resolve_codex() -> Option<PathBuf> {
 
     if let Some(home) = &home {
         candidates.push(home.join(".local/bin/codex"));
+        candidates.push(home.join(".bun/bin/codex"));
         candidates.push(home.join(".npm-global/bin/codex"));
         candidates.push(home.join(".cargo/bin/codex"));
         candidates.push(home.join("n/bin/codex"));
@@ -791,7 +2139,7 @@ fn resolve_codex() -> Option<PathBuf> {
         "/Applications/Codex.app/Contents/Resources/codex",
     ));
 
-    candidates.into_iter().find(|path| path.is_file())
+    first_binary(candidates)
 }
 
 fn resolve_opencode() -> Option<PathBuf> {
@@ -816,13 +2164,23 @@ fn resolve_opencode() -> Option<PathBuf> {
         candidates.extend(nvm_bin_candidates(home, "opencode"));
     }
 
-    candidates.into_iter().find(|path| path.is_file())
+    first_binary(candidates)
 }
 
+/// Prefers whatever `claude` the user's own shell resolves.
+///
+/// The fixed paths below are a fallback for a GUI launch that never sees the
+/// shell. Trying them first picks an install the user may have long since
+/// replaced: an abandoned `~/.local/bin/claude` silently wins over the one on
+/// their PATH, and the app then runs a different, older CLI than the terminal
+/// does — with features the newer one has simply absent.
 fn resolve_claude() -> Option<PathBuf> {
     let home = dirs_home().map(PathBuf::from);
     let mut candidates: Vec<PathBuf> = Vec::new();
 
+    if let Some(from_shell) = which_via_login_shell("claude") {
+        candidates.push(from_shell);
+    }
     if let Some(home) = &home {
         candidates.push(home.join(".local/bin/claude"));
         candidates.push(home.join(".claude/local/claude"));
@@ -842,7 +2200,7 @@ fn resolve_claude() -> Option<PathBuf> {
         candidates.extend(nvm_bin_candidates(home, "claude"));
     }
 
-    candidates.into_iter().find(|path| path.is_file())
+    first_binary(candidates)
 }
 
 fn resolve_pi() -> Option<PathBuf> {
@@ -876,7 +2234,7 @@ fn resolve_pi() -> Option<PathBuf> {
         }
     }
 
-    candidates.into_iter().find(|path| is_pi_coding_agent(path))
+    first_binary_matching(candidates, is_pi_coding_agent)
 }
 
 fn resolve_omp() -> Option<PathBuf> {
@@ -900,7 +2258,7 @@ fn resolve_omp() -> Option<PathBuf> {
         candidates.push(from_shell);
     }
 
-    candidates.into_iter().find(|path| is_omp_agent(path))
+    first_binary_matching(candidates, is_omp_agent)
 }
 
 /// omp ships as a ~126MB compiled binary, so the cheap string scan that
@@ -910,8 +2268,7 @@ fn is_omp_agent(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name != "omp" {
+    if !binary_name_eq(path, "omp") {
         return false;
     }
     help_mentions_rpc_mode(path)
@@ -938,19 +2295,92 @@ fn resolve_fx() -> Option<PathBuf> {
         candidates.push(from_shell);
     }
 
-    candidates.into_iter().find(|path| is_fx_agent(path))
+    first_binary_matching(candidates, is_fx_agent)
+}
+
+fn resolve_grok() -> Option<PathBuf> {
+    let home = dirs_home().map(PathBuf::from);
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Some(home) = &home {
+        candidates.push(home.join(".grok/bin/grok"));
+        candidates.push(home.join(".local/bin/grok"));
+        candidates.push(home.join(".npm-global/bin/grok"));
+        candidates.push(home.join(".cargo/bin/grok"));
+        candidates.push(home.join("n/bin/grok"));
+    }
+    #[cfg(target_os = "macos")]
+    candidates.push(PathBuf::from("/opt/homebrew/bin/grok"));
+    candidates.push(PathBuf::from("/usr/local/bin/grok"));
+    candidates.push(PathBuf::from("/usr/bin/grok"));
+    candidates.push(PathBuf::from("/snap/bin/grok"));
+    if let Some(from_shell) = which_via_login_shell("grok") {
+        candidates.push(from_shell);
+    }
+
+    first_binary_matching(candidates, is_grok_agent)
+}
+
+fn resolve_hermes() -> Option<PathBuf> {
+    let home = dirs_home().map(PathBuf::from);
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Some(home) = &home {
+        // Official per-user installer, then its underlying virtualenv in case
+        // the launcher symlink has not been added to PATH yet.
+        candidates.push(home.join(".local/bin/hermes"));
+        candidates.push(home.join(".hermes/hermes-agent/venv/bin/hermes"));
+        candidates.push(home.join(".hermes/hermes-agent/.venv/bin/hermes"));
+        candidates.push(home.join(".npm-global/bin/hermes"));
+        candidates.push(home.join(".cargo/bin/hermes"));
+        candidates.push(home.join("n/bin/hermes"));
+    }
+    #[cfg(windows)]
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+        // Native Windows installer launchers, then the underlying virtualenv.
+        candidates.push(local_app_data.join("hermes/bin/hermes"));
+        candidates.push(local_app_data.join("hermes/hermes-agent/venv/Scripts/hermes"));
+    }
+    #[cfg(target_os = "macos")]
+    candidates.push(PathBuf::from("/opt/homebrew/bin/hermes"));
+    candidates.push(PathBuf::from("/usr/local/bin/hermes"));
+    candidates.push(PathBuf::from("/usr/bin/hermes"));
+    candidates.push(PathBuf::from("/snap/bin/hermes"));
+    if let Some(from_shell) = which_via_login_shell("hermes") {
+        candidates.push(from_shell);
+    }
+
+    first_binary(candidates)
+}
+
+fn resolve_antigravity() -> Option<PathBuf> {
+    // The .par wrapper is a POSIX self-extracting archive — Antigravity ships
+    // no Windows ACP binary, so report the provider unavailable there instead
+    // of probing paths that can never be executable.
+    if cfg!(windows) {
+        return None;
+    }
+    let mut candidates = Vec::new();
+    if let Some(home) = dirs_home().map(PathBuf::from) {
+        // Prefer the wrapper: it sets the server's required resource directory.
+        candidates.push(home.join(".local/bin/agy_acp_server.par"));
+        candidates.push(home.join(".local/share/agy-acp/agy_acp_server.par"));
+    }
+    if let Some(from_shell) = which_via_login_shell("agy_acp_server.par") {
+        candidates.push(from_shell);
+    }
+    first_binary(candidates)
 }
 
 fn is_pi_coding_agent(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name != "pi" && name != "pi-coding-agent" {
-        return false;
-    }
-    if name == "pi-coding-agent" {
+    if binary_name_eq(path, "pi-coding-agent") {
         return true;
+    }
+    if !binary_name_eq(path, "pi") {
+        return false;
     }
     file_mentions_pi_coding_agent(path) || help_mentions_rpc_mode(path)
 }
@@ -980,7 +2410,7 @@ fn help_mentions_rpc_mode(path: &Path) -> bool {
     // fails outright without a PATH that has node on it.
     apply_gui_env(&mut cmd);
     isolate_child(&mut cmd);
-    let Ok(child) = cmd.spawn() else {
+    let Ok(child) = spawn_managed(&mut cmd) else {
         return false;
     };
     let pid = child.id();
@@ -1009,11 +2439,24 @@ fn is_fx_agent(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name != "fx" {
+    if !binary_name_eq(path, "fx") {
         return false;
     }
     file_mentions_fx_agent(path) || fx_help_mentions_acp(path)
+}
+
+fn is_grok_agent(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    if !binary_name_eq(path, "grok") {
+        return false;
+    }
+    // Official installer: ~/.grok/bin/grok
+    if path_has_component(path, ".grok") {
+        return true;
+    }
+    file_mentions_grok_agent(path) || grok_help_mentions_agent(path)
 }
 
 /// The fx markers sit megabytes into the compiled binary, so a small head-read
@@ -1058,7 +2501,7 @@ fn fx_help_mentions_acp(path: &Path) -> bool {
     // fails outright without a PATH that has node on it.
     apply_gui_env(&mut cmd);
     isolate_child(&mut cmd);
-    let Ok(child) = cmd.spawn() else {
+    let Ok(child) = spawn_managed(&mut cmd) else {
         return false;
     };
     let pid = child.id();
@@ -1083,19 +2526,78 @@ fn fx_help_mentions_acp(path: &Path) -> bool {
     }
 }
 
+fn file_mentions_grok_agent(path: &Path) -> bool {
+    const MARKERS: [&str; 4] = ["xai-grok", "Grok Build", "docs.x.ai/build", "grok agent"];
+    const CHUNK: usize = 1024 * 1024;
+    const OVERLAP: usize = 64;
+
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut reader = BufReader::new(file);
+    let mut buf = vec![0u8; CHUNK + OVERLAP];
+    let mut carry = 0usize;
+    loop {
+        let Ok(n) = reader.read(&mut buf[carry..]) else {
+            return false;
+        };
+        if n == 0 {
+            return false;
+        }
+        let filled = carry + n;
+        let text = String::from_utf8_lossy(&buf[..filled]);
+        if MARKERS.iter().any(|marker| text.contains(marker)) {
+            return true;
+        }
+        carry = filled.min(OVERLAP);
+        buf.copy_within(filled - carry..filled, 0);
+    }
+}
+
+fn grok_help_mentions_agent(path: &Path) -> bool {
+    let mut cmd = Command::new(path);
+    cmd.arg("--help")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_gui_env(&mut cmd);
+    isolate_child(&mut cmd);
+    let Ok(child) = spawn_managed(&mut cmd) else {
+        return false;
+    };
+    let pid = child.id();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(Duration::from_secs(2)) {
+        Ok(Ok(output)) => {
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .to_ascii_lowercase();
+            text.contains("grok build") || (text.contains("agent") && text.contains("stdio"))
+        }
+        _ => {
+            terminate(pid);
+            false
+        }
+    }
+}
+
 fn is_cursor_agent(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    let text = path.to_string_lossy();
-    if text.contains("/.grok/") {
+    if path_has_component(path, ".grok") {
         return false;
     }
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name == "cursor-agent" {
+    if binary_name_eq(path, "cursor-agent") {
         return true;
     }
-    if name == "agent" {
+    if binary_name_eq(path, "agent") {
         // One symlink hop. canonicalize() can walk into another .app
         // and trip macOS "data from other apps" TCC.
         if let Ok(target) = std::fs::read_link(path) {
@@ -1104,7 +2606,11 @@ fn is_cursor_agent(path: &Path) -> bool {
             } else {
                 path.parent().unwrap_or(path).join(target)
             };
-            return resolved.to_string_lossy().contains("cursor-agent");
+            return path_has_component(&resolved, "cursor-agent")
+                || resolved
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .contains("cursor-agent");
         }
     }
     false
@@ -1115,14 +2621,94 @@ fn is_cursor_agent(path: &Path) -> bool {
 /// Reads the cached PATH rather than spawning a shell per lookup: six
 /// resolvers each asking `command -v` meant six shell startups per probe.
 fn which_via_login_shell(name: &str) -> Option<PathBuf> {
-    which_in_path(&login_shell_path()?, name)
+    which_in_path(&gui_search_path(), name)
 }
 
 fn which_in_path(path: &str, name: &str) -> Option<PathBuf> {
-    path.split(':')
-        .filter(|dir| !dir.is_empty())
-        .map(|dir| Path::new(dir).join(name))
-        .find(|candidate| is_executable_file(candidate))
+    std::env::split_paths(std::ffi::OsStr::new(path)).find_map(|dir| {
+        if dir.as_os_str().is_empty() {
+            return None;
+        }
+        existing_binary(dir.join(name))
+    })
+}
+
+fn first_binary(candidates: Vec<PathBuf>) -> Option<PathBuf> {
+    candidates.into_iter().find_map(existing_binary)
+}
+
+fn first_binary_matching(
+    candidates: Vec<PathBuf>,
+    pred: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    candidates.into_iter().find_map(|path| {
+        let path = existing_binary(path)?;
+        pred(&path).then_some(path)
+    })
+}
+
+fn existing_binary(path: PathBuf) -> Option<PathBuf> {
+    #[cfg(windows)]
+    if path.extension().is_none() {
+        for ext in ["exe", "cmd", "bat", "com"] {
+            let candidate = path.with_extension(ext);
+            if is_executable_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    is_executable_file(&path).then_some(path)
+}
+
+#[cfg(all(test, windows))]
+mod windows_launcher_tests {
+    use super::*;
+
+    #[test]
+    fn npm_shell_shim_does_not_hide_windows_launcher() {
+        let dir = std::env::temp_dir().join(format!("monocode-launcher-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bare = dir.join("agent");
+        let cmd = dir.join("agent.cmd");
+        std::fs::write(&bare, b"#!/bin/sh\n").unwrap();
+        std::fs::write(&cmd, b"@echo off\n").unwrap();
+        assert_eq!(existing_binary(bare.clone()), Some(cmd.clone()));
+        std::fs::remove_file(&cmd).unwrap();
+        assert_eq!(existing_binary(bare.clone()), None);
+        std::fs::remove_file(bare).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+}
+
+fn configured_binary_name_eq(path: &Path, expected: &str) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if cfg!(windows) {
+        return binary_name_eq(path, expected);
+    }
+    name == expected
+}
+
+fn binary_name_eq(path: &Path, expected: &str) -> bool {
+    path.file_stem()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            if cfg!(windows) {
+                name.eq_ignore_ascii_case(expected)
+            } else {
+                name == expected
+            }
+        })
+}
+
+fn path_has_component(path: &Path, needle: &str) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|name| name == needle)
+    })
 }
 
 fn is_executable_file(path: &Path) -> bool {
@@ -1136,6 +2722,14 @@ fn is_executable_file(path: &Path) -> bool {
     #[cfg(not(unix))]
     {
         path.is_file()
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| {
+                    ["exe", "cmd", "bat", "com"]
+                        .iter()
+                        .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+                })
     }
 }
 
@@ -1183,7 +2777,7 @@ pub(crate) fn resolve_gui_binary(name: &str) -> Option<PathBuf> {
     which_in_path(&gui_search_path(), name)
 }
 
-fn gui_search_path() -> String {
+pub(crate) fn gui_search_path() -> String {
     gui_search_path_from(login_shell_path(), dirs_home(), std::env::var("PATH").ok())
 }
 
@@ -1192,29 +2786,46 @@ fn gui_search_path_from(
     home: Option<String>,
     existing: Option<String>,
 ) -> String {
-    let mut parts: Vec<String> = Vec::new();
+    let mut parts: Vec<PathBuf> = Vec::new();
     // Login-shell PATH first so Homebrew, mise, nvm, and custom dirs match
-    // the user's terminal. The fixed list is a fallback when that read fails.
+    // the user's terminal. Our own PATH next: that read can fail or time out,
+    // and an app started from a terminal still inherits the real thing, which
+    // beats guessing. The fixed dirs come last — they are all a Finder launch
+    // has, since launchd hands it a bare PATH, and preferring them over an
+    // inherited PATH is how an abandoned `~/.local/bin` install wins.
     if let Some(path) = login_path {
-        parts.push(path);
+        parts.extend(std::env::split_paths(&path));
+    }
+    if let Some(existing) = existing {
+        parts.extend(std::env::split_paths(&existing));
     }
     if let Some(home) = home {
-        parts.push(format!("{home}/.local/bin"));
-        parts.push(format!("{home}/.cargo/bin"));
-        parts.push(format!("{home}/.claude/local"));
-        parts.push(format!("{home}/.local/share/claude"));
-        parts.push(format!("{home}/.opencode/bin"));
-        parts.push(format!("{home}/.npm-global/bin"));
+        parts.push(format!("{home}/.local/bin").into());
+        parts.push(format!("{home}/.cargo/bin").into());
+        parts.push(format!("{home}/.claude/local").into());
+        parts.push(format!("{home}/.local/share/claude").into());
+        parts.push(format!("{home}/.opencode/bin").into());
+        parts.push(format!("{home}/.grok/bin").into());
+        parts.push(format!("{home}/.npm-global/bin").into());
+        parts.push(format!("{home}/.bun/bin").into());
+        parts.push(format!("{home}/AppData/Roaming/npm").into());
+        parts.push(format!("{home}/AppData/Local/Yarn/bin").into());
+        parts.push(format!("{home}/scoop/shims").into());
     }
     parts.push("/opt/homebrew/bin".into());
     parts.push("/usr/local/bin".into());
     parts.push("/usr/bin".into());
     parts.push("/bin".into());
     parts.push("/snap/bin".into());
-    if let Some(existing) = existing {
-        parts.push(existing);
+    #[cfg(windows)]
+    {
+        parts.push(r"C:\Program Files\Git\cmd".into());
+        parts.push(r"C:\Program Files\nodejs".into());
     }
-    parts.join(":")
+    std::env::join_paths(parts)
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn apply_gui_path(cmd: &mut Command) {
@@ -1223,6 +2834,7 @@ fn apply_gui_path(cmd: &mut Command) {
 
 pub(crate) fn apply_gui_env(cmd: &mut Command) {
     apply_gui_path(cmd);
+    crate::hide_window_console(cmd);
     if let Some(id) = passwd_identity() {
         if std::env::var_os("HOME").is_none() {
             cmd.env("HOME", &id.home);
@@ -1235,7 +2847,15 @@ pub(crate) fn apply_gui_env(cmd: &mut Command) {
             cmd.env("SHELL", &id.shell);
         }
     } else if let Some(home) = dirs_home() {
-        cmd.env("HOME", home);
+        cmd.env("HOME", &home);
+        if std::env::var_os("USERPROFILE").is_none() {
+            cmd.env("USERPROFILE", &home);
+        }
+        if std::env::var_os("USER").is_none() {
+            if let Ok(username) = std::env::var("USERNAME") {
+                cmd.env("USER", username);
+            }
+        }
     }
     if std::env::var_os("LANG").is_none() && std::env::var_os("LC_ALL").is_none() {
         cmd.env("LANG", "en_US.UTF-8");
@@ -1253,6 +2873,9 @@ fn prepare_child(cmd: &mut Command, command: &str) {
     if command_basename(command) == "fx" {
         apply_fx_env(cmd);
     }
+    if command_basename(command) == "grok" {
+        apply_grok_env(cmd);
+    }
     isolate_child(cmd);
 }
 
@@ -1263,11 +2886,18 @@ fn command_search_path(command: &str, base: &str) -> String {
     if parent.as_os_str().is_empty() {
         return base.to_string();
     }
-    let parent = parent.to_string_lossy();
-    if base.split(':').any(|entry| entry == parent) {
+    if std::env::split_paths(std::ffi::OsStr::new(base))
+        .next()
+        .as_deref()
+        == Some(parent)
+    {
         return base.to_string();
     }
-    format!("{parent}:{base}")
+    let paths = std::iter::once(parent.to_path_buf())
+        .chain(std::env::split_paths(std::ffi::OsStr::new(base)).filter(|entry| entry != parent));
+    std::env::join_paths(paths)
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| base.to_string())
 }
 
 /// fx keeps its Gateway credential in the macOS Keychain and reads it by
@@ -1290,15 +2920,28 @@ fn apply_fx_env(cmd: &mut Command) {
     }
 }
 
+fn apply_grok_env(cmd: &mut Command) {
+    for key in ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"] {
+        if std::env::var_os(key).is_some() {
+            continue;
+        }
+        if let Some(value) = login_shell_env(key) {
+            cmd.env(key, value);
+        }
+    }
+}
+
 static LOGIN_SHELL_ENV: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 /// Keys worth keeping out of `printenv`. PATH is the important one: a
 /// Finder-launched app inherits only launchd's bare PATH.
-const LOGIN_SHELL_KEYS: [&str; 4] = [
+const LOGIN_SHELL_KEYS: [&str; 6] = [
     "PATH",
     "AI_GATEWAY_API_KEY",
     "FX_AI_GATEWAY_API_KEY",
     "VERCEL_OIDC_TOKEN",
+    "XAI_API_KEY",
+    "GROK_CODE_XAI_API_KEY",
 ];
 
 fn login_shell_path() -> Option<String> {
@@ -1316,13 +2959,29 @@ fn login_shell_env(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn load_login_shell_env() -> HashMap<String, String> {
+    #[cfg(windows)]
+    {
+        LOGIN_SHELL_KEYS
+            .into_iter()
+            .filter_map(|key| {
+                let value = std::env::var(key).ok()?;
+                (!value.is_empty()).then(|| (key.to_string(), value))
+            })
+            .collect()
+    }
+    #[cfg(not(windows))]
+    load_unix_login_shell_env()
+}
+
 /// Read the environment the user actually gets in a terminal.
 ///
 /// `-lic`, not `-lc`: zsh reads `.zshrc` only for *interactive* shells, and
 /// version managers (nvm, fnm, mise, volta) all initialize from there. A
 /// login-but-not-interactive shell sees `.zshenv`/`.zprofile` only, so every
 /// nvm-managed CLI looks uninstalled.
-fn load_login_shell_env() -> HashMap<String, String> {
+#[cfg(not(windows))]
+fn load_unix_login_shell_env() -> HashMap<String, String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| {
         if cfg!(target_os = "macos") {
             "/bin/zsh".into()
@@ -1365,7 +3024,7 @@ fn load_login_shell_env() -> HashMap<String, String> {
 
 fn command_basename(command: &str) -> &str {
     Path::new(command)
-        .file_name()
+        .file_stem()
         .and_then(|name| name.to_str())
         .unwrap_or(command)
 }
@@ -1400,6 +3059,100 @@ mod tests {
         false
     }
 
+    /// A real child so `install_spawn` can be exercised directly, rather than
+    /// through a helper that re-states its condition.
+    fn live_child() -> (Arc<LiveChild>, std::process::Child) {
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn test process");
+        let pid = child.id();
+        let stdin = child.stdin.take().expect("test child stdin");
+        (
+            Arc::new(LiveChild {
+                cwd: PathBuf::from("/test"),
+                stdin: Mutex::new(stdin),
+                pid,
+                account: None,
+            }),
+            child,
+        )
+    }
+
+    fn reap(mut child: std::process::Child) {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn install_spawn_keeps_a_child_nothing_cancelled() {
+        let host = HarnessHost::new();
+        let (epoch, kill_all, _) = host.begin_spawn("s1");
+        let (live, child) = live_child();
+        let pid = live.pid;
+        assert!(host
+            .install_spawn("s1".into(), epoch, kill_all, live)
+            .is_none());
+        assert_eq!(host.get("s1").map(|live| live.pid), Some(pid));
+        reap(child);
+    }
+
+    #[test]
+    fn install_spawn_rejects_a_child_killed_mid_spawn() {
+        let host = HarnessHost::new();
+        let (epoch, kill_all, _) = host.begin_spawn("s1");
+        host.kill_session("s1");
+        let (live, child) = live_child();
+        assert!(host
+            .install_spawn("s1".into(), epoch, kill_all, live)
+            .is_some());
+        assert!(host.get("s1").is_none());
+        reap(child);
+    }
+
+    #[test]
+    fn install_spawn_rejects_a_child_after_kill_all() {
+        let host = HarnessHost::new();
+        let (epoch, kill_all, _) = host.begin_spawn("s1");
+        host.kill_all();
+        let (live, child) = live_child();
+        assert!(host
+            .install_spawn("s1".into(), epoch, kill_all, live)
+            .is_some());
+        assert!(host.get("s1").is_none());
+        reap(child);
+    }
+
+    #[test]
+    fn kill_during_spawn_invalidates_the_stamp() {
+        let host = HarnessHost::new();
+        let (epoch, kill_all, prev) = host.begin_spawn("s1");
+        assert!(prev.is_none());
+        assert!(host.spawn_stamp_current("s1", epoch, kill_all));
+        host.kill_session("s1");
+        assert!(!host.spawn_stamp_current("s1", epoch, kill_all));
+    }
+
+    #[test]
+    fn overlapping_spawn_invalidates_the_earlier_one() {
+        let host = HarnessHost::new();
+        let first = host.begin_spawn("s1");
+        let second = host.begin_spawn("s1");
+        assert!(!host.spawn_stamp_current("s1", first.0, first.1));
+        assert!(host.spawn_stamp_current("s1", second.0, second.1));
+    }
+
+    #[test]
+    fn kill_all_rejects_an_in_flight_spawn() {
+        let host = HarnessHost::new();
+        let (epoch, kill_all, _) = host.begin_spawn("s1");
+        host.kill_all();
+        assert!(!host.spawn_stamp_current("s1", epoch, kill_all));
+    }
+
     #[test]
     fn terminate_reaps_the_process_group() {
         let mut child = spawn_group("sleep 30 & sleep 30");
@@ -1410,6 +3163,36 @@ mod tests {
             let _ = child.kill();
             panic!("process group survived terminate");
         }
+    }
+
+    #[test]
+    fn kill_completes_while_a_stdin_write_is_blocked() {
+        use std::io::Write;
+        let host = HarnessHost::new();
+        // `sleep` never drains stdin: filling the pipe wedges the writer while
+        // it holds the stdin mutex — the worst case recovery must survive.
+        let (live, mut child) = live_child();
+        host.lock_inner()
+            .children
+            .insert("wedged".to_string(), live.clone());
+        let writer = thread::spawn(move || {
+            let payload = vec![b'x'; 8 * 1024 * 1024];
+            let mut stdin = live.stdin.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = stdin.write_all(&payload);
+        });
+        thread::sleep(Duration::from_millis(200));
+        // Kill needs neither the stdin mutex nor the writer's thread.
+        let live = host
+            .kill_session("wedged")
+            .expect("wedged child registered");
+        terminate(live.pid);
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !writer.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(writer.is_finished(), "blocked write survived the kill");
+        let _ = writer.join();
+        let _ = child.wait();
     }
 
     #[test]
@@ -1436,6 +3219,355 @@ mod tests {
             let _ = child.kill();
             panic!("process group survived after its leader exited");
         }
+    }
+
+    fn live_group(script: &str) -> (Arc<LiveChild>, std::process::Child) {
+        let mut child = Command::new("sh")
+            .args(["-c", script])
+            .process_group(0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn grouped child");
+        let pid = child.id();
+        let stdin = child.stdin.take().expect("grouped child stdin");
+        (
+            Arc::new(LiveChild {
+                cwd: PathBuf::from("/test"),
+                stdin: Mutex::new(stdin),
+                pid,
+                account: None,
+            }),
+            child,
+        )
+    }
+
+    #[test]
+    fn kill_all_reaps_term_ignoring_children_before_return() {
+        let host = HarnessHost::new();
+        let (epoch, kill_all, _) = host.begin_spawn("s1");
+        let (live, child) = live_group("trap '' TERM; while true; do sleep 1; done");
+        let pid = live.pid;
+        // `harness_spawn` always leaves a thread owning the `Child`. Without one
+        // the SIGKILLed leader lingers as a zombie that `kill(pid, 0)` still
+        // answers, so the test would not be exercising the real shutdown.
+        let waiter = thread::spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+        });
+        assert!(host
+            .install_spawn("s1".into(), epoch, kill_all, live)
+            .is_none());
+        host.kill_all();
+        let alive = tree_alive(pid);
+        let _ = waiter.join();
+        assert!(
+            !alive,
+            "kill_all returned while the harness tree was still alive"
+        );
+    }
+
+    #[test]
+    fn reap_snapshots_kills_a_marked_orphan() {
+        let mut child = Command::new("sh")
+            .args(["-c", "trap '' TERM; while true; do sleep 1; done"])
+            .process_group(0)
+            .env(HARNESS_PARENT_ENV, "2147483646")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn marked orphan");
+        let pid = child.id();
+        reap_snapshots(
+            &[ProcessSnapshot {
+                pid,
+                ppid: 1,
+                args: "/Users/n/.local/bin/cursor-agent acp".into(),
+                harness_parent: Some(2_147_483_646),
+            }],
+            std::process::id(),
+        );
+        if !wait_dead(pid, &mut child) {
+            let _ = child.kill();
+            panic!("marked orphan survived reap_snapshots");
+        }
+    }
+
+    #[test]
+    fn reap_snapshots_spares_children_of_this_process() {
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .env(HARNESS_PARENT_ENV, std::process::id().to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn live child");
+        let pid = child.id();
+        reap_snapshots(
+            &[ProcessSnapshot {
+                pid,
+                ppid: std::process::id(),
+                args: "sleep 30".into(),
+                harness_parent: Some(std::process::id()),
+            }],
+            std::process::id(),
+        );
+        if !tree_alive(pid) {
+            let _ = child.try_wait();
+            panic!("reap_snapshots killed a child of this process");
+        }
+        reap(child);
+    }
+
+    /// The marker is what lets the next launch tell a crashed run's leftovers
+    /// from a live instance's children. Every spawn funnels through
+    /// `isolate_child`, so losing it here silently un-reaps probes and shells.
+    #[cfg(unix)]
+    #[test]
+    fn only_text_file_busy_is_worth_respawning_for() {
+        assert!(is_text_file_busy(&std::io::Error::from_raw_os_error(
+            libc::ETXTBSY
+        )));
+        assert!(!is_text_file_busy(&std::io::Error::from_raw_os_error(
+            libc::ENOENT
+        )));
+        assert!(!is_text_file_busy(&std::io::Error::other("no errno")));
+    }
+
+    #[test]
+    fn isolate_child_stamps_the_reap_marker() {
+        let pid = std::process::id().to_string();
+        let mut cmd = Command::new("true");
+        isolate_child(&mut cmd);
+        assert!(cmd.get_envs().any(|(key, value)| {
+            key == std::ffi::OsStr::new(HARNESS_PARENT_ENV)
+                && value == Some(std::ffi::OsStr::new(pid.as_str()))
+        }));
+    }
+
+    #[test]
+    fn runtime_binary_paths_stay_fixed_for_the_process() {
+        let runtime = Mutex::new(None);
+        let old = HashMap::from([("cursor".to_string(), "/old".to_string())]);
+        let new = HashMap::from([("cursor".to_string(), "/new".to_string())]);
+
+        assert_eq!(initialize_runtime_binary_paths(&runtime, old.clone()), old);
+        assert_eq!(initialize_runtime_binary_paths(&runtime, new), old);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mcp_commands_use_active_configured_binaries() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root =
+            std::env::temp_dir().join(format!("monocode-mcp-binaries-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let host = HarnessHost::new();
+        let mut paths = HashMap::new();
+        for (provider, filename) in [
+            ("claude", "claude"),
+            ("codex", "codex"),
+            ("cursor", "cursor-agent"),
+            ("opencode", "opencode"),
+        ] {
+            let binary = root.join(filename);
+            std::fs::write(
+                &binary,
+                format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo '{provider} 2.3.4'; else printf '%s\\n' \"$@\"; fi\n"),
+            ).unwrap();
+            std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+            paths.insert(provider.to_string(), binary.to_string_lossy().into_owned());
+        }
+        initialize_runtime_binary_paths(&host.runtime_binary_paths, paths.clone());
+        initialize_runtime_binary_paths(&host.runtime_binary_paths, HashMap::new());
+        let cwd = root.to_string_lossy().into_owned();
+        for (provider, path) in &paths {
+            let active = host.runtime_binary_path(provider).unwrap();
+            assert_eq!(&active, path);
+            let binary = resolve_mcp_binary(provider, Some(&active)).unwrap();
+            assert_eq!(binary, PathBuf::from(path));
+            assert_eq!(
+                mcp_command(
+                    binary,
+                    vec!["mcp".into(), "login".into(), "docs".into()],
+                    cwd.clone(),
+                    Duration::from_secs(5),
+                )
+                .unwrap(),
+                "mcp\nlogin\ndocs"
+            );
+        }
+        assert_eq!(
+            claude_mcp_command(
+                vec!["mcp".into(), "list".into()],
+                cwd.clone(),
+                Duration::from_secs(5),
+                paths.get("claude").map(String::as_str),
+            )
+            .unwrap(),
+            "mcp\nlist"
+        );
+        for provider in ["claude", "codex"] {
+            let config = serde_json::json!({"command":"node","args":["docs"]});
+            let (binary, args) = mcp_add_args(
+                provider,
+                "user",
+                "docs",
+                &config,
+                paths.get(provider).map(String::as_str),
+            )
+            .unwrap();
+            assert_eq!(binary, PathBuf::from(&paths[provider]));
+            assert_eq!(
+                &args[..3],
+                [
+                    "mcp",
+                    if provider == "claude" {
+                        "add-json"
+                    } else {
+                        "add"
+                    },
+                    "docs"
+                ]
+            );
+            add_mcp_via_cli(
+                provider,
+                "user",
+                &cwd,
+                "docs",
+                &config,
+                paths.get(provider).map(String::as_str),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            opencode_major_version(&cwd, paths.get("opencode").map(String::as_str)),
+            Ok(2)
+        );
+        assert!(resolve_mcp_binary(
+            "claude",
+            Some(&root.join("missing/claude").to_string_lossy())
+        )
+        .is_err());
+        assert!(resolve_mcp_binary("claude", paths.get("codex").map(String::as_str)).is_err());
+        assert!(resolve_mcp_binary("pi", paths.get("claude").map(String::as_str)).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configured_binary_paths_fail_closed_and_stay_exact() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "monocode-configured-binaries-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let codex = dir.join("codex");
+        let opencode = dir.join("opencode");
+        let cursor_agent = dir.join("cursor-agent");
+        let decoy = dir.join("codex.sh");
+        let antigravity = dir.join("agy_acp_server");
+        let antigravity_wrapper = dir.join("agy_acp_server.par");
+        for path in [
+            &codex,
+            &opencode,
+            &cursor_agent,
+            &decoy,
+            &antigravity,
+            &antigravity_wrapper,
+        ] {
+            let script: &[u8] =
+                if path == &decoy || path == &antigravity || path == &antigravity_wrapper {
+                    b"#!/bin/sh\n"
+                } else if path == &codex {
+                    b"#!/bin/sh\necho 'codex-cli 0.156.1'\n"
+                } else if path == &cursor_agent {
+                    b"#!/bin/sh\necho '2026.09.23-86fc751'\n"
+                } else {
+                    b"#!/bin/sh\necho '1.18.32-beta'\n"
+                };
+            std::fs::write(path, script).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let codex_path = codex.to_string_lossy().into_owned();
+        let version_log = dir.join("version.log");
+        std::fs::write(
+            &codex,
+            format!(
+                "#!/bin/sh\necho check >> '{}'\necho 'codex-cli 0.156.1'\n",
+                version_log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(
+            resolve_harness_binary_override("codex", &codex_path),
+            Ok(codex.clone())
+        );
+        let _ = std::fs::remove_file(&version_log);
+        assert_eq!(
+            resolve_harness_binary_override("codex", &codex_path),
+            Ok(codex.clone())
+        );
+        assert!(!version_log.exists());
+        std::fs::write(
+            &codex,
+            format!(
+                "#!/bin/sh\necho check >> '{}'\necho 'codex-cli 0.157.0'\n",
+                version_log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            resolve_harness_binary_override("codex", &codex_path),
+            Ok(codex.clone())
+        );
+        assert!(version_log.exists());
+        assert_eq!(
+            resolve_harness_binary_override("opencode", &opencode.to_string_lossy()),
+            Ok(opencode.clone())
+        );
+        assert_eq!(
+            resolve_harness_binary_override("cursor", &cursor_agent.to_string_lossy()),
+            Ok(cursor_agent.clone())
+        );
+        assert!(is_resolved_harness_binary(
+            &codex_path,
+            Some("codex"),
+            Some(&codex_path)
+        ));
+        assert!(!is_resolved_harness_binary(
+            &codex_path,
+            Some("opencode"),
+            Some(&codex_path)
+        ));
+        assert!(resolve_harness_binary_override("codex", &opencode.to_string_lossy()).is_err());
+        assert!(resolve_harness_binary_override(
+            "opencode",
+            &dir.join("missing").to_string_lossy()
+        )
+        .is_err());
+        assert!(resolve_harness_binary_override("codex", "codex").is_err());
+        assert!(resolve_harness_binary_override("codex", &decoy.to_string_lossy()).is_err());
+        assert!(
+            resolve_harness_binary_override("antigravity", &antigravity.to_string_lossy()).is_err()
+        );
+        assert_eq!(
+            resolve_harness_binary_override("antigravity", &antigravity_wrapper.to_string_lossy()),
+            Ok(antigravity_wrapper.clone())
+        );
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -1476,14 +3608,33 @@ mod tests {
         let path = gui_search_path_from(
             Some("/custom/gh-dir:/usr/bin".into()),
             Some("/tmp/home".into()),
-            Some("/bin".into()),
+            Some("/inherited/bin".into()),
         );
         let parts: Vec<&str> = path.split(':').collect();
+        let at = |dir: &str| parts.iter().position(|part| *part == dir).unwrap();
         assert_eq!(parts[0], "/custom/gh-dir");
-        assert!(parts.contains(&"/tmp/home/.local/bin"));
-        assert!(parts.contains(&"/opt/homebrew/bin"));
+        assert!(parts.contains(&"/tmp/home/.grok/bin"));
         assert!(parts.contains(&"/usr/local/bin"));
-        assert_eq!(*parts.last().unwrap(), "/bin");
+        assert!(at("/custom/gh-dir") < at("/inherited/bin"));
+        assert!(at("/inherited/bin") < at("/tmp/home/.local/bin"));
+        assert!(at("/tmp/home/.local/bin") < at("/opt/homebrew/bin"));
+    }
+
+    /// The login read can fail or time out, and the fixed dirs are guesses: a
+    /// `claude` the user actually installed, on the PATH we were launched with,
+    /// has to win over an abandoned `~/.local/bin` one.
+    #[test]
+    fn inherited_path_beats_fixed_dirs_when_the_login_read_fails() {
+        let path = gui_search_path_from(
+            None,
+            Some("/tmp/home".into()),
+            Some("/opt/mise/shims:/usr/bin".into()),
+        );
+        let parts: Vec<&str> = path.split(':').collect();
+        let at = |dir: &str| parts.iter().position(|part| *part == dir).unwrap();
+        assert_eq!(parts[0], "/opt/mise/shims");
+        assert!(at("/opt/mise/shims") < at("/tmp/home/.local/bin"));
+        assert!(at("/tmp/home/.local/bin") < at("/opt/homebrew/bin"));
     }
 
     #[test]
@@ -1517,6 +3668,10 @@ mod tests {
             "/opt/homebrew/bin:/usr/bin"
         );
         assert_eq!(
+            command_search_path("/opt/homebrew/bin/codex", "/usr/bin:/opt/homebrew/bin"),
+            "/opt/homebrew/bin:/usr/bin"
+        );
+        assert_eq!(
             command_search_path("codex", "/usr/bin:/bin"),
             "/usr/bin:/bin"
         );
@@ -1533,13 +3688,20 @@ mod tests {
         let pid = child.id();
         let stdin = child.stdin.take().unwrap();
         let host = HarnessHost::new();
-        host.insert(
-            "session".into(),
-            Arc::new(LiveChild {
-                stdin: Mutex::new(stdin),
-                pid,
-            }),
-        );
+        let (epoch, kill_all, _) = host.begin_spawn("session");
+        assert!(host
+            .install_spawn(
+                "session".into(),
+                epoch,
+                kill_all,
+                Arc::new(LiveChild {
+                    cwd: PathBuf::from("/test"),
+                    stdin: Mutex::new(stdin),
+                    pid,
+                    account: None,
+                }),
+            )
+            .is_none());
 
         assert!(host
             .remove_if_pid("session", pid.saturating_add(1))
@@ -1671,9 +3833,65 @@ mod tests {
     }
 
     #[test]
+    fn grok_accepts_official_install_path_and_markers() {
+        let dir = std::env::temp_dir().join(format!("monocode-grok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let home = dir.join(".grok/bin");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let agent = home.join("grok");
+        std::fs::write(&agent, b"#!/bin/sh\necho other grok\n").unwrap();
+        assert!(is_grok_agent(&agent));
+
+        let marked = dir.join("grok");
+        std::fs::write(&marked, b"#!/bin/sh\n# Grok Build\n# xai-grok\n").unwrap();
+        assert!(is_grok_agent(&marked));
+
+        let other = dir.join("grok-cli");
+        std::fs::write(&other, b"#!/bin/sh\necho not grok\n").unwrap();
+        assert!(!is_grok_agent(&other));
+
+        assert!(!is_grok_agent(&dir.join("missing")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn antigravity_resolver_prefers_executable_wrapper_and_tracks_orphans() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("monocode-agy-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        let wrapper = dir.join("bin/agy_acp_server.par");
+        let server = dir.join("agy_acp_server.par");
+        std::fs::write(&wrapper, b"#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::write(&server, b"#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let candidates = vec![wrapper.clone(), server.clone()];
+        assert_eq!(first_binary(candidates.clone()), Some(server));
+        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(first_binary(candidates), Some(wrapper));
+        assert!(looks_like_harness_argv(
+            "/home/user/.local/share/agy-acp/agy_acp_server.par"
+        ));
+        assert!(!looks_like_harness_argv("agy --help"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn antigravity_launch_args_match_the_platform_registry() {
+        if cfg!(target_os = "linux") {
+            assert_eq!(antigravity_args(), vec!["--uid="]);
+        } else {
+            assert!(antigravity_args().is_empty());
+        }
+    }
+
+    #[test]
     fn command_basename_strips_path() {
         assert_eq!(command_basename("/Users/me/.local/bin/fx"), "fx");
         assert_eq!(command_basename("fx"), "fx");
+        assert_eq!(command_basename("/Users/me/.grok/bin/grok"), "grok");
+        assert_eq!(command_basename("fx.exe"), "fx");
     }
 
     #[test]
@@ -1732,6 +3950,7 @@ mod exec_allowlist_tests {
         assert!(exec_args_allowed(&args(&["--list-models"])));
         assert!(exec_args_allowed(&args(&["models", "--verbose"])));
         assert!(exec_args_allowed(&args(&["models", "--json"])));
+        assert!(exec_args_allowed(&args(&["models"])));
         assert!(exec_args_allowed(&args(&["status", "--json"])));
         assert!(exec_args_allowed(&args(&["agent", "list"])));
     }
@@ -1741,8 +3960,170 @@ mod exec_allowlist_tests {
         assert!(!exec_args_allowed(&args(&[])));
         assert!(!exec_args_allowed(&args(&["--help"])));
         assert!(!exec_args_allowed(&args(&["--version", "--json"])));
-        assert!(!exec_args_allowed(&args(&["models"])));
         assert!(!exec_args_allowed(&args(&["-c", "id"])));
         assert!(!exec_args_allowed(&args(&["agent", "list", "--json"])));
+    }
+}
+
+#[cfg(all(windows, test))]
+mod windows_binary_tests {
+    use super::*;
+
+    #[test]
+    fn configured_binary_path_accepts_windows_shim_extension() {
+        let dir = std::env::temp_dir().join(format!(
+            "monocode-configured-windows-binary-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let shim = dir.join("codex.cmd");
+        std::fs::write(&shim, b"@echo off\r\necho codex-cli 0.156.1\r\n").unwrap();
+        let shim_path = shim.to_string_lossy().into_owned();
+
+        assert_eq!(
+            resolve_harness_binary_override("codex", &shim_path),
+            Ok(shim.clone())
+        );
+        assert!(is_resolved_harness_binary(
+            &shim_path,
+            Some("codex"),
+            Some(&shim_path)
+        ));
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod reap_logic_tests {
+    use super::*;
+
+    fn row(pid: u32, ppid: u32, args: &str, parent: Option<u32>) -> ProcessSnapshot {
+        ProcessSnapshot {
+            pid,
+            ppid,
+            args: args.into(),
+            harness_parent: parent,
+        }
+    }
+
+    #[test]
+    fn parse_ps_row_reads_pid_ppid_and_args() {
+        let parsed = parse_ps_row(
+            " 2436     1 /Users/n/.local/bin/cursor-agent --use-system-ca index.js acp",
+        )
+        .unwrap();
+        assert_eq!(parsed.pid, 2436);
+        assert_eq!(parsed.ppid, 1);
+        assert!(parsed.args.contains("cursor-agent"));
+        assert!(parsed.args.ends_with(" acp") || parsed.args.ends_with("acp"));
+        assert_eq!(parsed.harness_parent, None);
+    }
+
+    #[test]
+    fn parse_ps_row_reads_harness_parent_from_env_tail() {
+        let parsed = parse_ps_row(
+            " 27129 21504 /Users/n/cursor-agent acp PATH=/usr/bin MONOCODE_HARNESS_PARENT=21504 HOME=/tmp",
+        )
+        .unwrap();
+        assert_eq!(parsed.pid, 27129);
+        assert_eq!(parsed.ppid, 21504);
+        assert_eq!(parsed.harness_parent, Some(21504));
+    }
+
+    #[test]
+    fn parse_proc_ppid_skips_a_comm_holding_spaces_and_parens() {
+        assert_eq!(
+            parse_proc_ppid("2436 (cursor-agent) S 1 2436 2436 0 -1"),
+            Some(1)
+        );
+        assert_eq!(
+            parse_proc_ppid("2436 (Web Content (x)) S 21504 2436 0 -1"),
+            Some(21504)
+        );
+        assert_eq!(parse_proc_ppid("2436 no-parens S 1"), None);
+    }
+
+    #[test]
+    fn harness_parent_from_bytes_reads_the_marker() {
+        let mut buf = b"PATH=/usr/bin\0".to_vec();
+        buf.extend_from_slice(HARNESS_PARENT_ENV.as_bytes());
+        buf.extend_from_slice(b"=21504\0HOME=/tmp\0");
+        assert_eq!(harness_parent_from_bytes(&buf), Some(21504));
+    }
+
+    #[test]
+    fn should_reap_marked_child_of_a_dead_parent() {
+        let proc = row(
+            10,
+            1,
+            "/Users/n/.local/bin/cursor-agent --use-system-ca index.js acp",
+            Some(999),
+        );
+        assert!(should_reap_process(&proc, 42, |_| false));
+        assert!(!should_reap_process(&proc, 42, |_| true));
+    }
+
+    #[test]
+    fn should_not_reap_our_own_marked_child() {
+        let proc = row(10, 42, "/Users/n/.local/bin/cursor-agent acp", Some(42));
+        assert!(!should_reap_process(&proc, 42, |_| true));
+    }
+
+    #[test]
+    fn should_not_reap_a_terminal_program_even_if_marked() {
+        assert!(!should_reap_process(
+            &row(10, 1, "tmux new -s work", Some(999)),
+            42,
+            |_| false,
+        ));
+        assert!(!should_reap_process(
+            &row(11, 1, "npm start", Some(999)),
+            42,
+            |_| false,
+        ));
+        assert!(!should_reap_process(
+            &row(12, 1, "-zsh", Some(999)),
+            42,
+            |_| false,
+        ));
+    }
+
+    #[test]
+    fn looks_like_harness_argv_accepts_agent_clis_only() {
+        assert!(looks_like_harness_argv(
+            "/Users/n/.local/bin/cursor-agent --use-system-ca index.js acp"
+        ));
+        assert!(looks_like_harness_argv(
+            "/opt/homebrew/bin/node /Users/n/.local/share/cursor-agent/versions/x/index.js worker-server"
+        ));
+        assert!(looks_like_harness_argv("/Users/n/.local/bin/claude --help"));
+        assert!(looks_like_harness_argv("/Users/n/.local/bin/hermes acp"));
+        assert!(!looks_like_harness_argv("tmux new -s work"));
+        assert!(!looks_like_harness_argv("npm start"));
+        assert!(!looks_like_harness_argv(
+            "node /Users/n/code/app/node_modules/typescript/lib/tsserver.js"
+        ));
+    }
+
+    #[test]
+    fn parse_ps_pid_command_does_not_treat_the_binary_as_ppid() {
+        let (pid, command) = parse_ps_pid_command(
+            " 27129 /Users/n/cursor-agent acp PATH=/usr/bin MONOCODE_HARNESS_PARENT=21504 HOME=/tmp",
+        )
+        .unwrap();
+        assert_eq!(pid, 27129);
+        assert_eq!(harness_parent_from_bytes(command.as_bytes()), Some(21504));
+    }
+
+    #[test]
+    fn should_reap_legacy_cursor_acp_orphaned_to_launchd() {
+        let args = "/Users/n/.local/bin/cursor-agent --use-system-ca /Users/n/index.js acp";
+        assert!(should_reap_process(&row(10, 1, args, None), 42, |_| false));
+        assert!(!should_reap_process(&row(10, 42, args, None), 42, |_| true));
+        assert!(!is_legacy_orphaned_cursor_acp(
+            "node /usr/local/bin/typescript-language-server --stdio"
+        ));
     }
 }

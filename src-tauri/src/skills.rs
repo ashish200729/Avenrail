@@ -19,16 +19,88 @@ pub struct DiscoveredSkill {
     pub source: String,
 }
 
-/// Skills visible for the open project: `.agents/skills` first, then native
-/// harness folders. Same name: earlier roots win.
-#[tauri::command(async)]
-pub fn list_skills(cwd: String) -> Result<Vec<DiscoveredSkill>, String> {
-    let project = expand_home(&cwd);
-    let home = dirs_home().map(PathBuf::from);
-    Ok(list_skills_from(&project, home.as_deref()))
+struct DisabledFilter {
+    normalized: HashSet<String>,
+    canonical: HashSet<PathBuf>,
 }
 
-pub(crate) fn list_skills_from(project: &Path, home: Option<&Path>) -> Vec<DiscoveredSkill> {
+impl DisabledFilter {
+    fn new(paths: Option<&[String]>) -> Option<Self> {
+        let paths = paths?;
+        if paths.is_empty() {
+            return None;
+        }
+        let normalized = paths
+            .iter()
+            .map(|p| normalize_path_for_compare(p))
+            .collect();
+        let canonical = paths
+            .iter()
+            .filter_map(|p| std::fs::canonicalize(expand_home(p)).ok())
+            .collect();
+        Some(Self {
+            normalized,
+            canonical,
+        })
+    }
+
+    fn is_disabled(&self, path: &str) -> bool {
+        let normalized = normalize_path_for_compare(path);
+        if self.normalized.contains(&normalized) {
+            return true;
+        }
+        if !self.canonical.is_empty() {
+            if let Ok(canon) = std::fs::canonicalize(path) {
+                if self.canonical.contains(&canon) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+#[cfg(windows)]
+fn normalize_path_for_compare(path: &str) -> String {
+    let mut s = path.replace('\\', "/");
+    if let Some(stripped) = s.strip_prefix("//?/") {
+        s = stripped.to_string();
+    }
+    while s.contains("//") {
+        s = s.replace("//", "/");
+    }
+    s.to_lowercase()
+}
+
+#[cfg(not(windows))]
+fn normalize_path_for_compare(path: &str) -> String {
+    path.to_string()
+}
+
+/// Skills visible for the open project: `.agents/skills` first, then native
+/// harness folders. Same name: earlier roots win.
+/// Excludes disabled paths before deduplication so lower-priority enabled
+/// same-name files can fall through.
+#[tauri::command(async)]
+pub fn list_skills(
+    cwd: String,
+    disabled_paths: Option<Vec<String>>,
+) -> Result<Vec<DiscoveredSkill>, String> {
+    let project = expand_home(&cwd);
+    let home = dirs_home().map(PathBuf::from);
+    Ok(list_skills_from(
+        &project,
+        home.as_deref(),
+        disabled_paths.as_deref(),
+    ))
+}
+
+pub(crate) fn list_skills_from(
+    project: &Path,
+    home: Option<&Path>,
+    disabled_paths: Option<&[String]>,
+) -> Vec<DiscoveredSkill> {
+    let disabled_filter = DisabledFilter::new(disabled_paths);
     let mut by_name: HashMap<String, DiscoveredSkill> = HashMap::new();
     let mut seen_roots: HashSet<PathBuf> = HashSet::new();
 
@@ -41,6 +113,12 @@ pub(crate) fn list_skills_from(project: &Path, home: Option<&Path>) -> Vec<Disco
             return;
         }
         for skill in scan_root(&root, scope, source) {
+            if disabled_filter
+                .as_ref()
+                .is_some_and(|f| f.is_disabled(&skill.path))
+            {
+                continue;
+            }
             if by_name.len() >= MAX_SKILLS {
                 break;
             }
@@ -62,6 +140,8 @@ pub(crate) fn list_skills_from(project: &Path, home: Option<&Path>) -> Vec<Disco
         (".pi/skills", "pi"),
         (".omp/skills", "omp"),
         (".fx/skills", "fx"),
+        (".grok/skills", "grok"),
+        (".hermes/skills", "hermes"),
     ] {
         add_root(project.join(dir), "project", source);
         if let Some(home) = home {
@@ -71,11 +151,216 @@ pub(crate) fn list_skills_from(project: &Path, home: Option<&Path>) -> Vec<Disco
     if let Some(home) = home {
         add_root(home.join(".pi/agent/skills"), "user", "pi");
         add_root(home.join(".omp/agent/skills"), "user", "omp");
+        // New-provider roots come after every pre-existing root so an
+        // identically named skill can never shadow an established provider.
+        let root = home.join(".gemini/antigravity/skills");
+        if root.is_dir() {
+            add_root(root, "user", "antigravity");
+        }
+        for (root, scope, namespace) in claude_plugin_skill_roots(home, project) {
+            add_namespaced_root(
+                &mut by_name,
+                root,
+                scope,
+                "claude",
+                &namespace,
+                disabled_filter.as_ref(),
+            );
+        }
     }
 
     let mut out: Vec<DiscoveredSkill> = by_name.into_values().collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
+}
+
+fn add_namespaced_root(
+    by_name: &mut HashMap<String, DiscoveredSkill>,
+    root: PathBuf,
+    scope: &str,
+    source: &str,
+    namespace: &str,
+    disabled_filter: Option<&DisabledFilter>,
+) {
+    if by_name.len() >= MAX_SKILLS {
+        return;
+    }
+    for mut skill in scan_root(&root, scope, source) {
+        if disabled_filter.is_some_and(|f| f.is_disabled(&skill.path)) {
+            continue;
+        }
+        if by_name.len() >= MAX_SKILLS {
+            break;
+        }
+        skill.name = format!("{namespace}:{}", skill.name);
+        by_name.entry(skill.name.clone()).or_insert(skill);
+    }
+}
+
+fn claude_plugin_skill_roots(home: &Path, project: &Path) -> Vec<(PathBuf, &'static str, String)> {
+    let registry = home.join(".claude/plugins/installed_plugins.json");
+    let Ok(raw) = std::fs::read_to_string(registry) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Vec::new();
+    };
+    let Some(plugins) = value.get("plugins").and_then(|value| value.as_object()) else {
+        return Vec::new();
+    };
+
+    let mut roots = Vec::new();
+    for (plugin_id, installed) in plugins {
+        if !claude_plugin_enabled(home, project, plugin_id) {
+            continue;
+        }
+        let namespace = plugin_id
+            .rsplit_once('@')
+            .map(|(name, _)| name)
+            .unwrap_or(plugin_id);
+        if !is_valid_skill_name(namespace) {
+            continue;
+        }
+        let entries: Vec<&serde_json::Value> = match installed.as_array() {
+            Some(entries) => entries.iter().collect(),
+            None if installed.is_object() => vec![installed],
+            None => continue,
+        };
+        for entry in entries {
+            let Some(install_path) = entry.get("installPath").and_then(|value| value.as_str())
+            else {
+                continue;
+            };
+            let scope = match entry.get("scope").and_then(|value| value.as_str()) {
+                Some("project" | "local") => {
+                    let Some(project_path) =
+                        entry.get("projectPath").and_then(|value| value.as_str())
+                    else {
+                        continue;
+                    };
+                    if !path_is_within(project, &resolve_home_path(project_path, home)) {
+                        continue;
+                    }
+                    "project"
+                }
+                Some("user") | None => "user",
+                Some(_) => continue,
+            };
+            roots.push((
+                resolve_home_path(install_path, home).join("skills"),
+                scope,
+                namespace.to_string(),
+            ));
+        }
+    }
+    roots.sort_by_key(|(_, scope, _)| if *scope == "project" { 0 } else { 1 });
+    roots
+}
+
+fn resolve_home_path(raw: &str, home: &Path) -> PathBuf {
+    if raw == "~" {
+        return home.to_path_buf();
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        return home.join(rest);
+    }
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        home.join(path)
+    }
+}
+
+fn claude_plugin_enabled(home: &Path, project: &Path, plugin_id: &str) -> bool {
+    if let Some(enabled) = managed_plugin_setting(plugin_id) {
+        return enabled;
+    }
+    let project_root = claude_settings_project_root(project);
+    for settings in [
+        project_root.join(".claude/settings.local.json"),
+        project_root.join(".claude/settings.json"),
+        home.join(".claude/settings.json"),
+    ] {
+        if let Some(enabled) = plugin_setting(&settings, plugin_id) {
+            return enabled;
+        }
+    }
+    true
+}
+
+fn claude_settings_project_root(project: &Path) -> PathBuf {
+    for candidate in project.ancestors() {
+        let claude = candidate.join(".claude");
+        if claude.join("settings.local.json").is_file() || claude.join("settings.json").is_file() {
+            return candidate.to_path_buf();
+        }
+    }
+    project.to_path_buf()
+}
+
+fn plugin_setting(path: &Path, plugin_id: &str) -> Option<bool> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    value.get("enabledPlugins")?.get(plugin_id)?.as_bool()
+}
+
+fn managed_plugin_setting(plugin_id: &str) -> Option<bool> {
+    let root = managed_settings_root()?;
+    managed_plugin_setting_from_root(&root, plugin_id)
+}
+
+fn managed_plugin_setting_from_root(root: &Path, plugin_id: &str) -> Option<bool> {
+    let mut value = plugin_setting(&root.join("managed-settings.json"), plugin_id);
+    let dir = root.join("managed-settings.d");
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().and_then(|ext| ext.to_str()) == Some("json")
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| !name.starts_with('.'))
+        })
+        .collect();
+    files.sort();
+    for file in files {
+        if let Some(enabled) = plugin_setting(&file, plugin_id) {
+            value = Some(enabled);
+        }
+    }
+    value
+}
+
+fn managed_settings_root() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        return Some(PathBuf::from("/Library/Application Support/ClaudeCode"));
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        return Some(PathBuf::from("/etc/claude-code"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return Some(PathBuf::from(r"C:\Program Files\ClaudeCode"));
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    let Ok(path) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    let Ok(root) = std::fs::canonicalize(root) else {
+        return false;
+    };
+    path == root || path.starts_with(root)
 }
 
 fn scan_root(root: &Path, scope: &str, source: &str) -> Vec<DiscoveredSkill> {
@@ -113,7 +398,7 @@ fn scan_root(root: &Path, scope: &str, source: &str) -> Vec<DiscoveredSkill> {
         out.push(DiscoveredSkill {
             name,
             description,
-            path: skill_md.to_string_lossy().into_owned(),
+            path: crate::fs::path_to_js(&skill_md),
             scope: scope.to_string(),
             source: source.to_string(),
         });
@@ -307,6 +592,15 @@ mod tests {
         std::fs::write(dir.join("SKILL.md"), body).unwrap();
     }
 
+    fn write_plugin_setting(root: &Path, file: &str, plugin_id: &str, enabled: bool) {
+        let dir = root.join(".claude");
+        std::fs::create_dir_all(&dir).unwrap();
+        let settings = serde_json::json!({
+            "enabledPlugins": { plugin_id: enabled }
+        });
+        std::fs::write(dir.join(file), serde_json::to_vec(&settings).unwrap()).unwrap();
+    }
+
     #[test]
     fn parse_frontmatter_reads_name_and_folded_description() {
         let (name, desc) = parse_frontmatter(
@@ -349,7 +643,7 @@ mod tests {
             "---\nname: cursor-only\ndescription: Cursor native\n---\n",
         );
 
-        let skills = list_skills_from(&project.0, Some(&home.0));
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
         let ship = skills.iter().find(|s| s.name == "ship").unwrap();
         assert_eq!(ship.description, "Avenrail ship");
         assert_eq!(ship.source, "agents");
@@ -379,7 +673,7 @@ mod tests {
             "---\nname: pi-global\ndescription: Pi user skill\n---\n",
         );
 
-        let skills = list_skills_from(&project.0, Some(&home.0));
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
         let project_skill = skills.iter().find(|s| s.name == "pi-review").unwrap();
         assert_eq!(project_skill.source, "pi");
         assert_eq!(project_skill.scope, "project");
@@ -403,7 +697,7 @@ mod tests {
             "---\nname: fx-global\ndescription: fx user skill\n---\n",
         );
 
-        let skills = list_skills_from(&project.0, Some(&home.0));
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
         let project_skill = skills.iter().find(|s| s.name == "fx-review").unwrap();
         assert_eq!(project_skill.source, "fx");
         assert_eq!(project_skill.scope, "project");
@@ -413,10 +707,417 @@ mod tests {
     }
 
     #[test]
+    fn discovers_grok_project_and_user_skills() {
+        let project = tmp("proj-grok");
+        let home = tmp("home-grok");
+        write_skill(
+            &project.0.join(".grok/skills"),
+            "grok-review",
+            "---\nname: grok-review\ndescription: grok project skill\n---\n",
+        );
+        write_skill(
+            &home.0.join(".grok/skills"),
+            "grok-global",
+            "---\nname: grok-global\ndescription: grok user skill\n---\n",
+        );
+
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
+        let project_skill = skills.iter().find(|s| s.name == "grok-review").unwrap();
+        assert_eq!(project_skill.source, "grok");
+        assert_eq!(project_skill.scope, "project");
+        let user_skill = skills.iter().find(|s| s.name == "grok-global").unwrap();
+        assert_eq!(user_skill.source, "grok");
+        assert_eq!(user_skill.scope, "user");
+    }
+
+    #[test]
+    fn discovers_hermes_project_and_user_skills() {
+        let project = tmp("proj-hermes");
+        let home = tmp("home-hermes");
+        write_skill(
+            &project.0.join(".hermes/skills"),
+            "hermes-review",
+            "---\nname: hermes-review\ndescription: Hermes project skill\n---\n",
+        );
+        write_skill(
+            &home.0.join(".hermes/skills"),
+            "hermes-global",
+            "---\nname: hermes-global\ndescription: Hermes user skill\n---\n",
+        );
+
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
+        let project_skill = skills.iter().find(|s| s.name == "hermes-review").unwrap();
+        assert_eq!(project_skill.source, "hermes");
+        assert_eq!(project_skill.scope, "project");
+        let user_skill = skills.iter().find(|s| s.name == "hermes-global").unwrap();
+        assert_eq!(user_skill.source, "hermes");
+        assert_eq!(user_skill.scope, "user");
+    }
+
+    #[test]
+    fn discovers_antigravity_user_skills() {
+        let project = tmp("proj-agy");
+        let home = tmp("home-agy");
+        write_skill(
+            &home.0.join(".gemini/antigravity/skills"),
+            "agy-review",
+            "---\nname: agy-review\ndescription: Antigravity user skill\n---\n",
+        );
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
+        let agy = skills.iter().find(|s| s.name == "agy-review").unwrap();
+        assert_eq!(agy.source, "antigravity");
+        assert_eq!(agy.scope, "user");
+    }
+
+    #[test]
+    fn antigravity_skills_do_not_shadow_existing_providers() {
+        let project = tmp("proj-agy-shadow");
+        let home = tmp("home-agy-shadow");
+        for (root, desc) in [
+            (home.0.join(".omp/agent/skills"), "OMP agent skill"),
+            (
+                home.0.join(".gemini/antigravity/skills"),
+                "Antigravity user skill",
+            ),
+        ] {
+            write_skill(
+                &root,
+                "shared-name",
+                &format!("---\nname: shared-name\ndescription: {desc}\n---\n"),
+            );
+        }
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
+        let skill = skills.iter().find(|s| s.name == "shared-name").unwrap();
+        assert_eq!(skill.description, "OMP agent skill");
+        assert_eq!(skill.source, "omp");
+    }
+
+    #[test]
+    fn discovers_installed_claude_plugin_skills() {
+        let project = tmp("proj-claude-plugin");
+        let home = tmp("home-claude-plugin");
+        let plugin = home
+            .0
+            .join(".claude/plugins/cache/community/workflow-kit/1.2.3");
+        write_skill(
+            &plugin.join("skills"),
+            "quick-plan",
+            "---\nname: quick-plan\ndescription: Plan from plugin\n---\n",
+        );
+        write_skill(
+            &home.0.join(".claude/skills"),
+            "quick-plan",
+            "---\nname: quick-plan\ndescription: Personal plan\n---\n",
+        );
+        std::fs::create_dir_all(home.0.join(".claude/plugins")).unwrap();
+        std::fs::write(
+            home.0.join(".claude/plugins/installed_plugins.json"),
+            r#"{"version":2,"plugins":{"workflow-kit@community":[{"scope":"user","installPath":"~/.claude/plugins/cache/community/workflow-kit/1.2.3","version":"1.2.3"}]}}"#,
+        )
+        .unwrap();
+
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
+        let skill = skills
+            .iter()
+            .find(|skill| skill.name == "workflow-kit:quick-plan")
+            .unwrap();
+        assert_eq!(skill.description, "Plan from plugin");
+        assert_eq!(skill.source, "claude");
+        assert_eq!(skill.scope, "user");
+        assert!(skill
+            .path
+            .ends_with("workflow-kit/1.2.3/skills/quick-plan/SKILL.md"));
+        assert!(skills.iter().any(|skill| skill.name == "quick-plan"));
+    }
+
+    #[test]
+    fn claude_project_plugins_only_apply_to_their_project() {
+        let project = tmp("proj-claude-scoped");
+        let other = tmp("other-claude-scoped");
+        let home = tmp("home-claude-scoped");
+        let plugin = home
+            .0
+            .join(".claude/plugins/cache/community/workflow-kit/2.0.0");
+        write_skill(
+            &plugin.join("skills"),
+            "feature-delivery",
+            "---\nname: feature-delivery\ndescription: Deliver feature\n---\n",
+        );
+        std::fs::create_dir_all(home.0.join(".claude/plugins")).unwrap();
+        let registry = serde_json::json!({
+            "version": 2,
+            "plugins": {
+                "workflow-kit@community": [{
+                    "scope": "project",
+                    "projectPath": project.0.to_string_lossy(),
+                    "installPath": plugin.to_string_lossy(),
+                    "version": "2.0.0"
+                }]
+            }
+        });
+        std::fs::write(
+            home.0.join(".claude/plugins/installed_plugins.json"),
+            serde_json::to_vec(&registry).unwrap(),
+        )
+        .unwrap();
+
+        let nested = project.0.join("src");
+        std::fs::create_dir_all(&nested).unwrap();
+        let matching = list_skills_from(&nested, Some(&home.0), None);
+        let skill = matching
+            .iter()
+            .find(|skill| skill.name == "workflow-kit:feature-delivery")
+            .unwrap();
+        assert_eq!(skill.scope, "project");
+
+        let unrelated = list_skills_from(&other.0, Some(&home.0), None);
+        assert!(!unrelated
+            .iter()
+            .any(|skill| skill.name == "workflow-kit:feature-delivery"));
+    }
+
+    #[test]
+    fn disabled_claude_plugin_skills_are_hidden() {
+        let project = tmp("proj-claude-disabled");
+        let home = tmp("home-claude-disabled");
+        let plugin = home
+            .0
+            .join(".claude/plugins/cache/community/workflow-kit/1.2.3");
+        write_skill(
+            &plugin.join("skills"),
+            "quick-plan",
+            "---\nname: quick-plan\ndescription: Plan from plugin\n---\n",
+        );
+        std::fs::create_dir_all(home.0.join(".claude/plugins")).unwrap();
+        std::fs::write(
+            home.0.join(".claude/plugins/installed_plugins.json"),
+            r#"{"version":2,"plugins":{"workflow-kit@community":[{"scope":"user","installPath":"~/.claude/plugins/cache/community/workflow-kit/1.2.3","version":"1.2.3"}]}}"#,
+        )
+        .unwrap();
+        write_plugin_setting(&home.0, "settings.json", "workflow-kit@community", false);
+
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
+        assert!(!skills
+            .iter()
+            .any(|skill| skill.name == "workflow-kit:quick-plan"));
+    }
+
+    #[test]
+    fn claude_plugin_enablement_uses_local_project_user_precedence() {
+        let project = tmp("proj-claude-precedence");
+        let nested = project.0.join("src");
+        let home = tmp("home-claude-precedence");
+        std::fs::create_dir_all(&nested).unwrap();
+        write_plugin_setting(&home.0, "settings.json", "workflow-kit@community", false);
+        write_plugin_setting(&project.0, "settings.json", "workflow-kit@community", true);
+        assert!(claude_plugin_enabled(
+            &home.0,
+            &nested,
+            "workflow-kit@community"
+        ));
+        write_plugin_setting(
+            &project.0,
+            "settings.local.json",
+            "workflow-kit@community",
+            false,
+        );
+        assert!(!claude_plugin_enabled(
+            &home.0,
+            &nested,
+            "workflow-kit@community"
+        ));
+    }
+
+    #[test]
+    fn managed_plugin_settings_apply_dropins_in_order() {
+        let root = tmp("managed-settings");
+        let plugin_id = "workflow-kit@community";
+        let base = serde_json::json!({ "enabledPlugins": { plugin_id: true } });
+        std::fs::write(
+            root.0.join("managed-settings.json"),
+            serde_json::to_vec(&base).unwrap(),
+        )
+        .unwrap();
+        let dropins = root.0.join("managed-settings.d");
+        std::fs::create_dir_all(&dropins).unwrap();
+        let earlier = serde_json::json!({ "enabledPlugins": { plugin_id: true } });
+        let later = serde_json::json!({ "enabledPlugins": { plugin_id: false } });
+        std::fs::write(
+            dropins.join("10-enable.json"),
+            serde_json::to_vec(&earlier).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            dropins.join("20-disable.json"),
+            serde_json::to_vec(&later).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            managed_plugin_setting_from_root(&root.0, plugin_id),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn path_is_within_fails_closed_when_either_path_is_missing() {
+        let root = tmp("path-root");
+        let nested = root.0.join("src");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert!(path_is_within(&nested, &root.0));
+        assert!(!path_is_within(&root.0.join("missing"), &root.0));
+        assert!(!path_is_within(&nested, &root.0.join("missing")));
+    }
+
+    #[test]
+    fn ignores_unregistered_claude_plugin_cache_versions() {
+        let project = tmp("proj-claude-stale");
+        let home = tmp("home-claude-stale");
+        let stale = home
+            .0
+            .join(".claude/plugins/cache/community/workflow-kit/0.9.0");
+        write_skill(
+            &stale.join("skills"),
+            "stale-skill",
+            "---\nname: stale-skill\ndescription: Old cached skill\n---\n",
+        );
+        std::fs::create_dir_all(home.0.join(".claude/plugins")).unwrap();
+        std::fs::write(
+            home.0.join(".claude/plugins/installed_plugins.json"),
+            r#"{"version":2,"plugins":{}}"#,
+        )
+        .unwrap();
+
+        let skills = list_skills_from(&project.0, Some(&home.0), None);
+        assert!(!skills.iter().any(|skill| skill.name == "stale-skill"));
+    }
+
+    #[test]
     fn skips_dirs_without_skill_md() {
         let project = tmp("empty");
         std::fs::create_dir_all(project.0.join(".agents/skills/nope")).unwrap();
-        let skills = list_skills_from(&project.0, None);
+        let skills = list_skills_from(&project.0, None, None);
         assert!(skills.is_empty());
+    }
+    #[test]
+    fn disabled_project_skill_falls_back_to_same_name_personal_skill() {
+        let project = tmp("proj-fallback");
+        let home = tmp("home-fallback");
+        write_skill(
+            &project.0.join(".agents/skills"),
+            "review",
+            "---\nname: review\ndescription: Project review\n---\n",
+        );
+        write_skill(
+            &home.0.join(".agents/skills"),
+            "review",
+            "---\nname: review\ndescription: Personal review\n---\n",
+        );
+
+        let project_skill_path =
+            crate::fs::path_to_js(&project.0.join(".agents/skills/review/SKILL.md"));
+        let personal_skill_path =
+            crate::fs::path_to_js(&home.0.join(".agents/skills/review/SKILL.md"));
+
+        // 1. When neither is disabled, project skill wins.
+        let enabled_skills = list_skills_from(&project.0, Some(&home.0), None);
+        let review = enabled_skills.iter().find(|s| s.name == "review").unwrap();
+        assert_eq!(review.description, "Project review");
+        assert_eq!(review.path, project_skill_path);
+        assert_eq!(review.scope, "project");
+
+        // 2. When only project skill is disabled, personal skill is active fallback.
+        let fallback_skills = list_skills_from(
+            &project.0,
+            Some(&home.0),
+            Some(std::slice::from_ref(&project_skill_path)),
+        );
+        let review = fallback_skills.iter().find(|s| s.name == "review").unwrap();
+        assert_eq!(review.description, "Personal review");
+        assert_eq!(review.path, personal_skill_path);
+        assert_eq!(review.scope, "user");
+
+        // 3. When project skill is re-enabled, project skill wins again.
+        let restored_skills = list_skills_from(&project.0, Some(&home.0), Some(&[]));
+        let review = restored_skills.iter().find(|s| s.name == "review").unwrap();
+        assert_eq!(review.description, "Project review");
+        assert_eq!(review.path, project_skill_path);
+
+        // 4. When both are disabled, skill is omitted from catalog.
+        let none_skills = list_skills_from(
+            &project.0,
+            Some(&home.0),
+            Some(&[project_skill_path.clone(), personal_skill_path.clone()]),
+        );
+        assert!(none_skills.iter().all(|s| s.name != "review"));
+
+        // 5. When lower-priority personal skill is disabled, project winner is unaffected.
+        let winner_skills = list_skills_from(
+            &project.0,
+            Some(&home.0),
+            Some(std::slice::from_ref(&personal_skill_path)),
+        );
+        let review = winner_skills.iter().find(|s| s.name == "review").unwrap();
+        assert_eq!(review.description, "Project review");
+        assert_eq!(review.path, project_skill_path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn disabled_skill_matching_handles_windows_separators_and_case() {
+        let project = tmp("proj-sep");
+        let home = tmp("home-sep");
+        write_skill(
+            &project.0.join(".agents/skills"),
+            "fmt",
+            "---\nname: fmt\ndescription: Project fmt\n---\n",
+        );
+        write_skill(
+            &home.0.join(".agents/skills"),
+            "fmt",
+            "---\nname: fmt\ndescription: Personal fmt\n---\n",
+        );
+
+        // Windows: verify both backslash separator handling and case-insensitivity
+        let raw_project_path = project
+            .0
+            .join(".agents/skills/fmt/SKILL.md")
+            .to_string_lossy()
+            .replace('/', "\\")
+            .to_uppercase();
+        let skills = list_skills_from(&project.0, Some(&home.0), Some(&[raw_project_path]));
+        let fmt = skills.iter().find(|s| s.name == "fmt").unwrap();
+        assert_eq!(fmt.description, "Personal fmt");
+        assert_eq!(fmt.scope, "user");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn disabled_skill_matching_preserves_distinct_unix_paths_with_backslashes() {
+        let project = tmp("proj-unix-bs");
+        let skill_with_bs_dir = project.0.join(".agents/skills/a\\b");
+        write_skill(
+            skill_with_bs_dir.parent().unwrap(),
+            "a\\b",
+            "---\nname: slash-skill\ndescription: Slash skill\n---\n",
+        );
+        let nested_file = project.0.join(".agents/skills/a/b/SKILL.md");
+        std::fs::create_dir_all(nested_file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &nested_file,
+            "---\nname: nested-skill\ndescription: Nested\n---\n",
+        )
+        .unwrap();
+
+        assert!(skill_with_bs_dir.join("SKILL.md").exists());
+        assert!(nested_file.exists());
+
+        let nested_path = crate::fs::path_to_js(&nested_file);
+        let skills = list_skills_from(&project.0, None, Some(&[nested_path]));
+        let slash_skill = skills.iter().find(|s| s.name == "slash-skill");
+        assert!(
+            slash_skill.is_some(),
+            "distinct backslash path on Unix must not be disabled by colliding slash path"
+        );
     }
 }

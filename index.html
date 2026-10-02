@@ -3,16 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/avenrail.svg" />
     <title>Avenrail</title>
-    <meta name="application-name" content="Avenrail" />
-    <meta name="description" content="A desktop workspace for your coding agents." />
-    <link rel="icon" type="image/svg+xml" href="/avenrail.svg" />
     <script>
       (function () {
         try {
           var root = document.documentElement;
           var hue = localStorage.getItem("monocode.themeHue");
           var sat = localStorage.getItem("monocode.themeSaturation");
+          var darkLightness = localStorage.getItem(
+            "monocode.themeDarkLightness",
+          );
           var opacity = localStorage.getItem("monocode.sidebarOpacity");
           if (hue != null) {
             var h = Math.max(0, Math.min(360, Number(hue) || 0));
@@ -22,11 +23,21 @@
             var s = Math.max(0, Math.min(100, Number(sat) || 0));
             root.style.setProperty("--theme-saturation", s + "%");
           }
+          if (darkLightness != null) {
+            var l = Math.max(0, Math.min(30, Number(darkLightness) || 0));
+            root.style.setProperty("--theme-dark-lightness", l + "%");
+          }
           if (opacity != null) {
             var o = Math.max(0.15, Math.min(1, Number(opacity) || 0.85));
             root.style.setProperty("--sidebar-opacity", String(o));
           }
-          if (localStorage.getItem("monocode.colorScheme") === "light") {
+          var scheme = localStorage.getItem("monocode.colorScheme");
+          if (scheme === "system") {
+            scheme = window.matchMedia("(prefers-color-scheme: light)").matches
+              ? "light"
+              : "dark";
+          }
+          if (scheme === "light") {
             root.classList.add("theme-light");
           }
           var bodyGlass = localStorage.getItem("monocode.bodyGlass");
@@ -46,8 +57,9 @@
       :root {
         --theme-hue: 240;
         --theme-saturation: 0%;
+        --theme-dark-lightness: 9%;
         --sidebar-opacity: 0.85;
-        --background-lightness: 9%;
+        --background-lightness: var(--theme-dark-lightness);
         --color-background-base: hsl(
           var(--theme-hue) var(--theme-saturation) var(--background-lightness)
         );
@@ -57,8 +69,15 @@
         --background-lightness: 97%;
       }
 
-      /* Match .body-glass before index.css loads, so the window is not a
-         clear pane over the desktop while the bundle is still arriving. */
+      html,
+      body,
+      #boot-splash {
+        margin: 0;
+        background: var(--color-background-base);
+      }
+
+      /* Opaque cover until React paints. The logo is in HTML so it is
+         visible during the Dock bounce, before the bundle runs. */
       #boot-splash {
         position: fixed;
         inset: 0;
@@ -67,20 +86,11 @@
         align-items: center;
         justify-content: center;
         pointer-events: none;
-        background: var(--color-background-base);
+        transition: opacity 0.16s ease;
       }
 
-      html.glass-body #boot-splash {
-        background: color-mix(
-          in srgb,
-          var(--color-background-base) calc(var(--sidebar-opacity) * 100%),
-          transparent
-        );
-      }
-
-      #boot-splash.boot-splash-out img {
+      #boot-splash.boot-splash-out {
         opacity: 0;
-        transition: opacity 0.12s ease;
       }
 
       #boot-splash img {
@@ -88,19 +98,10 @@
         height: 72px;
         object-fit: contain;
         display: block;
-        transition: opacity 0.12s ease;
       }
     </style>
   </head>
   <body>
-    <!-- AVENRAIL IDENTITY · a21fdab4
-    THESIS: A maker's mark for a workspace shared by coding agents. Preserve the approved working layout.
-    OWN-WORLD: A forest-ink A mark on a pale jade plate, system typography, existing neutral dark and light chrome.
-    STORY: Recognize Avenrail at launch and About, then work in existing projects, sessions, files, and review tools.
-    FIRST VIEWPORT: The welcome question and composer stay uncluttered; identity appears only at the boot splash and About.
-    FORM: Maker's stamp, grounded direction 3. The user's established workspace references constrain the identity scope.
-    FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
-    -->
     <div id="boot-splash" aria-hidden="true">
       <img src="/avenrail.svg" alt="" />
     </div>
