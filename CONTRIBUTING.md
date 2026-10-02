@@ -46,7 +46,7 @@ One provider is enough. Avenrail probes for each CLI at startup and disables the
 npm run check
 ```
 
-That runs what CI runs: vitest, `tsc --noEmit`, `cargo fmt`, `cargo clippy`, and `cargo test`. If it’s green locally it should be green on GitHub. `npm run check:web` and `npm run check:rust` run the two halves separately when you only touched one side.
+That runs the local branding, installation-check tests, frontend, remote-host, and Rust checks. This repository does not include GitHub Actions workflows; run these checks locally before pushing. `npm run check:web`, `npm run test:host`, and `npm run check:rust` check the affected layer separately when you only touched one side.
 
 ## New providers
 
@@ -94,6 +94,6 @@ git merge --ff-only sync/monocode-YYYY-MM-DD
 
 Review the diff against both parents. Retain Avenrail's icon, display identity, repository and release links, workspace panel, composer arrangement, and disabled usage footer/game background. Preserve `com.monocode.desktop`, `monocode.db`, preference/event namespaces, legacy recovery markers, and documented remote-host protocol identifiers. Keep the new upstream code paths when modules move; transplant the fork's behavior into those paths rather than retaining a second copy of the old application.
 
-Validate desktop startup, existing-data migration, provider turns, terminal lifecycle, narrow panes, and packaging on each supported OS before distributing an update. Hosted CI and signed package checks remain separate from local tests. For a small isolated fix, cherry-pick its upstream commit onto a dedicated branch instead of doing a full sync.
+Validate desktop startup, existing-data migration, provider turns, terminal lifecycle, narrow panes, and packaging on each supported OS before distributing an update. Cross-platform and signed package checks remain separate from local tests. For a small isolated fix, cherry-pick its upstream commit onto a dedicated branch instead of doing a full sync.
 
 The 2026-10-02 integration and its validation status are recorded in [the sync review](docs/upstream-sync-2026-10-02.md).

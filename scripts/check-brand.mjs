@@ -69,12 +69,6 @@ assert.ok(
 assert.ok(!existsSync(join(root, "src-tauri/macos/Assets.car")));
 assert.ok(!read("src-tauri/Info.plist").includes("CFBundleIconName"));
 assert.ok(!config.bundle.resources?.["macos/Assets.car"]);
-assert.ok(
-  read(".github/workflows/release.yml").includes(`${brand.name}.app.tar.gz`),
-);
-assert.ok(read(".github/workflows/release.yml").includes(`${brand.name}.dmg`));
-assert.ok(read(".github/workflows/release.yml").includes("/MonoCode.dmg"));
-assert.ok(read(".github/workflows/release.yml").includes("/MonoCode_x64.dmg"));
 assert.ok(!read("src/app/App.tsx").includes("<UsageFooter"));
 assert.ok(!read("src/features/sessions/ui/EmptySession.tsx").includes("TerminalGridBackground"));
 assert.ok(
@@ -121,5 +115,5 @@ for (const file of [...walk("src"), ...walk("src-tauri/src")].filter(
   assert.ok(!source.includes("MonoCode"), `Old display name in ${file}`);
 }
 console.log(
-  `${brand.name}: display identity, package versions, desktop icons, release names, and legacy data identifiers verified.`,
+  `${brand.name}: display identity, package versions, desktop icons, repository links, and legacy data identifiers verified.`,
 );
