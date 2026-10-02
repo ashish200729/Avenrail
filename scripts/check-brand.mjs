@@ -16,11 +16,17 @@ assert.equal(
   json("src-tauri/tauri.linux.conf.json").app.windows[0].title,
   brand.name,
 );
+assert.equal(
+  json("src-tauri/tauri.windows.conf.json").app.windows[0].title,
+  brand.name,
+);
 assert.equal(pkg.name, `${brand.slug}-desktop`);
 assert.equal(lock.name, pkg.name);
 assert.equal(lock.packages[""].name, pkg.name);
 assert.equal(lock.version, pkg.version);
 assert.equal(lock.packages[""].version, pkg.version);
+assert.deepEqual(lock.packages[""].dependencies, pkg.dependencies);
+assert.deepEqual(lock.packages[""].devDependencies, pkg.devDependencies);
 assert.equal(config.version, pkg.version);
 assert.match(
   read("src-tauri/Cargo.toml"),
@@ -37,6 +43,8 @@ assert.match(
   ),
 );
 assert.match(read("index.html"), new RegExp(`<title>${brand.name}</title>`));
+assert.match(read("quick-composer.html"), new RegExp(`<title>${brand.name}</title>`));
+assert.ok(!read("src-tauri/src/main.rs").includes("monocode_lib"));
 assert.ok(read("index.html").includes(brand.icon));
 assert.ok(read("public/avenrail.svg").includes(`<title>${brand.name}</title>`));
 
@@ -60,11 +68,15 @@ assert.ok(
 );
 assert.ok(!existsSync(join(root, "src-tauri/macos/Assets.car")));
 assert.ok(!read("src-tauri/Info.plist").includes("CFBundleIconName"));
+assert.ok(!config.bundle.resources?.["macos/Assets.car"]);
 assert.ok(
   read(".github/workflows/release.yml").includes(`${brand.name}.app.tar.gz`),
 );
 assert.ok(read(".github/workflows/release.yml").includes(`${brand.name}.dmg`));
 assert.ok(read(".github/workflows/release.yml").includes("/MonoCode.dmg"));
+assert.ok(read(".github/workflows/release.yml").includes("/MonoCode_x64.dmg"));
+assert.ok(!read("src/app/App.tsx").includes("<UsageFooter"));
+assert.ok(!read("src/features/sessions/ui/EmptySession.tsx").includes("TerminalGridBackground"));
 assert.ok(
   read("src-tauri/Cargo.toml").includes(
     "https://github.com/ashish200729/Avenrail",

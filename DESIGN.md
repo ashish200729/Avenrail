@@ -92,7 +92,7 @@ components:
     backgroundColor: "{colors.inverse-surface}"
     textColor: "{colors.inverse-content}"
     rounded: "{rounded.control}"
-    size: "26px"
+    size: "28px"
   button-secondary:
     backgroundColor: "transparent"
     textColor: "{colors.content-soft}"
@@ -227,14 +227,14 @@ The form language is gently rounded and compact. Standard controls use `6px` cor
 ### Buttons
 
 - **Shape:** Compact controls use `6px` corners; icon buttons use `28px` square hit areas and `8px` corners.
-- **Primary:** The composer send/stop control is a `26px` square with a white surface, black icon, and a `6px` corner. Disabled send uses the same surface at reduced opacity.
+- **Primary:** The composer send/stop control is a `28px` square with a white surface, black icon, and a `6px` corner. Light mode uses the inverse theme colors. Disabled send uses the same surface at reduced opacity.
 - **Hover / Focus:** Secondary controls use a content wash on hover. Chrome icon buttons transition background and color in `120ms ease-out` and use a `2px` blue focus outline with `2px` offset; reduced motion removes that transition.
 - **Secondary / Ghost / Tertiary:** Secondary buttons are transparent with a one-pixel quiet border, `10px` horizontal and `4px` vertical padding, and muted content that strengthens on hover.
 
 ### Chips
 
-- **Style:** Composer tool buttons are `26px` square, `6px` rounded, and use a translucent content surface; their active state is a stronger content mix.
-- **State:** Segmented controls use a `6px` bordered group with `2px` inner padding; selected options use a `5px` corner and active content wash. Provider, model, branch, and permission pickers remain available. All controls sit below the message field without an internal divider or added decoration. A compact project/context row appears only when it has content. The bottom action row contains Attach, Model, model settings, and Access on the left; the branch selector sits beside Send/Stop on the right. Cap long branch labels and preserve the full branch name in the tooltip. Use a paperclip for attachments, settings controls for model options, a git-fork for branches, and shields for access modes. When a model has multiple settings, combine them into one dropdown that summarizes the first two selected values; a single setting keeps its direct control. Access stays separate until narrow-pane overflow groups the secondary controls. Secondary buttons stay transparent at rest; the model keeps a subtle fill and Send/Stop retains primary emphasis. Secondary settings appear inline when their measured widths fit beside Attach, Model, Branch, and Send/Stop. Only when space is insufficient do the secondary controls move into Composer options; widening restores them inline. A 12px return margin avoids boundary flicker. The overflow trigger displays the current access mode (or Options for providers without access modes). Both inline pickers and overflow use the same compact styled menus with checked choices; overflow rows open a choice list inside the popup, with Back and Escape navigation. Do not use a large form, native sub-selects, or a Done button for these choices. Hidden measurement controls are clipped, inert, and excluded from assistive navigation. Textarea height and highlight width are remeasured when the pane width changes; the draft and caret are preserved.
+- **Style:** Composer tool buttons are `28px` square and `6px` rounded. Secondary tools are transparent at rest, with a content wash on hover and a stronger mix when active.
+- **State:** Segmented controls use a `6px` bordered group with `2px` inner padding; selected options use a `5px` corner and active content wash. All composer controls sit below the message field without an internal divider. A compact project/context row appears only when it has content. Attach, Model, model settings, and Access sit on the left; the working-copy indicator and branch selector sit beside Send/Stop on the right. Use consistent `28px` control heights and `12px` labels. Secondary controls stay transparent at rest; the model has a subtle fill and Send/Stop retains primary emphasis. In the composer, show the workspace identity as a compact icon with its full accessible name and tooltip; draft workspace mode remains selectable. The branch reserves at least `80px`, caps the Git group at `256px`, truncates long labels with the full name in the tooltip, and has a dropdown chevron. At composer widths of `560px` or less, the action group moves to a second row; model settings and Access wrap rather than hiding or requiring horizontal scrolling. Preserve the model-controls preference, choice menus, worktree actions, attachment access, and Send/Stop behavior. Width changes remeasure textarea height without replacing the draft or moving its selection. Loading, disabled, active, and keyboard-focus states remain explicit.
 
 ### Cards / Containers
 

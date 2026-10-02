@@ -1,0 +1,197 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font-size",
+        "value": "11px",
+        "files": [
+          "src/features/files/ui/FileTree.tsx"
+        ],
+        "createdAt": "2026-10-02T06:11:47.051Z",
+        "reason": "Existing upstream file-tree typography retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "14px",
+        "files": [
+          "src/features/files/ui/FileTree.tsx"
+        ],
+        "createdAt": "2026-10-02T06:11:47.079Z",
+        "reason": "Existing upstream file-tree typography retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "11px",
+        "files": [
+          "src/app/shell/TitleBar.tsx"
+        ],
+        "createdAt": "2026-10-02T06:17:49.516Z",
+        "reason": "Existing upstream title-bar typography retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "10px",
+        "files": [
+          "src/app/shell/TitleBar.tsx"
+        ],
+        "createdAt": "2026-10-02T06:17:49.788Z",
+        "reason": "Existing upstream title-bar typography retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "10px",
+        "files": [
+          "src/features/sessions/ui/Composer.tsx"
+        ],
+        "createdAt": "2026-10-02T06:28:52.199Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "11px",
+        "files": [
+          "src/features/sessions/ui/Composer.tsx"
+        ],
+        "createdAt": "2026-10-02T06:28:52.231Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "9px",
+        "files": [
+          "src/features/sessions/ui/Composer.tsx"
+        ],
+        "createdAt": "2026-10-02T06:28:52.265Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.303Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "bounce-easing",
+        "value": "*",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.334Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "layout-transition",
+        "value": "*",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.366Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#e2c08d",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.399Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "8.5px",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.433Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "22px",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.465Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "11px",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.496Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "10px",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.529Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "14px",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.561Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#e39b4a",
+        "files": [
+          "src/styles/index.css"
+        ],
+        "createdAt": "2026-10-02T06:28:52.594Z",
+        "reason": "Inherited upstream typography, semantic color, and motion retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "10px",
+        "files": [
+          "src/features/source-control/ui/GitPickerTrigger.tsx"
+        ],
+        "createdAt": "2026-10-02T06:33:49.796Z",
+        "reason": "Existing upstream worktree-badge typography retained during the upstream integration"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "10px",
+        "files": [
+          "src/app/shell/Sidebar.tsx"
+        ],
+        "createdAt": "2026-10-02T13:19:04.090Z",
+        "reason": "Existing compact session and project metadata typography retained while consolidating the sidebar"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "11px",
+        "files": [
+          "src/app/shell/Sidebar.tsx"
+        ],
+        "createdAt": "2026-10-02T13:19:04.120Z",
+        "reason": "Existing compact session and project metadata typography retained while consolidating the sidebar"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "11px",
+        "files": [
+          "src/app/shell/ProjectRail.tsx"
+        ],
+        "createdAt": "2026-10-02T13:19:04.151Z",
+        "reason": "Existing compact session and project metadata typography retained while consolidating the sidebar"
+      }
+    ]
+  }
+}

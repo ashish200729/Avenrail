@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
 members = ["src-tauri"]
+exclude = ["vendor/portable-pty"]
 
 [workspace.package]
-version = "0.1.18"
+version = "0.6.0"
 edition = "2021"
 license = "MIT"
 
@@ -11,3 +12,14 @@ license = "MIT"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+
+# Keep desktop development and local tests from duplicating multi-gigabyte
+# debug/incremental artifacts. Override with Cargo's profile environment vars
+# when native source-level debugging is needed.
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false

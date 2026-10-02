@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -57,6 +58,8 @@ pub struct LinearIssue {
     pub repo: String,
     pub team_id: String,
     pub team_name: String,
+    pub project_id: String,
+    pub project_name: String,
     pub project_path: String,
 }
 
@@ -68,7 +71,35 @@ pub struct LinearIssueDetails {
     pub author_avatar_url: String,
 }
 
-#[tauri::command]
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearIssueComment {
+    pub id: String,
+    pub kind: String,
+    pub author: String,
+    pub author_avatar_url: String,
+    pub body: String,
+    pub created_at: String,
+    pub url: String,
+    pub state: String,
+    pub path: String,
+    pub line: Option<i64>,
+    pub resolved: bool,
+    pub thread_id: String,
+    pub replies: Vec<LinearIssueComment>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearIssueThread {
+    pub comments: Vec<LinearIssueComment>,
+    pub truncated: bool,
+    pub review_decision: String,
+    pub base_ref_name: String,
+    pub head_ref_name: String,
+}
+
+#[tauri::command(async)]
 pub fn linear_status(app: AppHandle) -> Result<LinearStatus, String> {
     Ok(LinearStatus {
         connected: read_token(&app)?.is_some(),
@@ -145,6 +176,59 @@ pub async fn linear_issue_details(
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+pub async fn linear_issue_thread(app: AppHandle, id: String) -> Result<LinearIssueThread, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = require_token(&app)?;
+        let id = id.trim();
+        if !valid_linear_id(id) {
+            return Err("Missing Linear issue".into());
+        }
+        let data = graphql_with_token(&token, ISSUE_COMMENTS_QUERY, json!({ "id": id }))?;
+        parse_linear_issue_thread(&data)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn linear_issue_comment(
+    app: AppHandle,
+    id: String,
+    body: String,
+    parent_id: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let token = require_token(&app)?;
+        let id = id.trim();
+        if !valid_linear_id(id) {
+            return Err("Missing Linear issue".into());
+        }
+        let body = body.trim();
+        if body.is_empty() {
+            return Err("Comment cannot be empty".into());
+        }
+        let parent = parent_id.trim();
+        if !parent.is_empty() && !valid_linear_id(parent) {
+            return Err("Invalid Linear comment".into());
+        }
+        let mut input = serde_json::Map::new();
+        input.insert("issueId".into(), json!(id));
+        input.insert("body".into(), json!(body));
+        if !parent.is_empty() {
+            input.insert("parentId".into(), json!(parent));
+        }
+        let data = graphql_with_token(
+            &token,
+            COMMENT_CREATE_MUTATION,
+            json!({ "input": Value::Object(input) }),
+        )?;
+        parse_linear_comment_create(&data)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 const VIEWER_QUERY: &str = "query { viewer { id } }";
 const TEAMS_QUERY: &str = r#"
 query {
@@ -165,6 +249,7 @@ query InboxIssues($first: Int!, $filter: IssueFilter) {
       updatedAt
       state { name type }
       team { id key name }
+      project { id name }
       labels { nodes { name color } }
       assignee { name displayName avatarUrl }
     }
@@ -177,6 +262,31 @@ query InboxIssue($id: String!) {
     description
     creator { name displayName avatarUrl }
     assignee { name displayName avatarUrl }
+  }
+}
+"#;
+const ISSUE_COMMENTS_QUERY: &str = r#"
+query InboxIssueComments($id: String!) {
+  issue(id: $id) {
+    comments(first: 50) {
+      pageInfo { hasNextPage }
+      nodes {
+        id
+        body
+        createdAt
+        url
+        user { name displayName avatarUrl }
+        parent { id }
+      }
+    }
+  }
+}
+"#;
+const COMMENT_CREATE_MUTATION: &str = r#"
+mutation InboxCommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) {
+    success
+    comment { id url }
   }
 }
 "#;
@@ -328,6 +438,13 @@ fn parse_linear_issue(node: &Value) -> Option<LinearIssue> {
     let team_name = team
         .and_then(|value| string_field(value, "name"))
         .unwrap_or_else(|| team_key.clone());
+    let project = node.get("project");
+    let project_id = project
+        .and_then(|value| string_field(value, "id"))
+        .unwrap_or_default();
+    let project_name = project
+        .and_then(|value| string_field(value, "name"))
+        .unwrap_or_default();
     let state = node.get("state");
     Some(LinearIssue {
         provider: "linear".into(),
@@ -350,6 +467,8 @@ fn parse_linear_issue(node: &Value) -> Option<LinearIssue> {
         repo: team_key,
         team_id,
         team_name,
+        project_id,
+        project_name,
         project_path: String::new(),
     })
 }
@@ -370,6 +489,130 @@ fn parse_linear_issue_details(data: &Value) -> Result<LinearIssueDetails, String
         author: author.unwrap_or_default(),
         author_avatar_url,
     })
+}
+
+fn parse_linear_issue_thread(data: &Value) -> Result<LinearIssueThread, String> {
+    let issue = data
+        .get("issue")
+        .ok_or_else(|| "Linear did not return that issue".to_string())?;
+    let comments_field = issue
+        .get("comments")
+        .ok_or_else(|| "Linear did not return comments".to_string())?;
+    let truncated = comments_field
+        .pointer("/pageInfo/hasNextPage")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let nodes = comments_field
+        .get("nodes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Linear did not return comments".to_string())?;
+    let rows: Vec<ParsedLinearComment> = nodes.iter().filter_map(parse_linear_comment).collect();
+    Ok(LinearIssueThread {
+        comments: nest_linear_comments(rows),
+        truncated,
+        review_decision: String::new(),
+        base_ref_name: String::new(),
+        head_ref_name: String::new(),
+    })
+}
+
+struct ParsedLinearComment {
+    id: String,
+    parent_id: String,
+    comment: LinearIssueComment,
+}
+
+fn parse_linear_comment(node: &Value) -> Option<ParsedLinearComment> {
+    let id = string_field(node, "id").filter(|value| !value.is_empty())?;
+    let (author, author_avatar_url) = person_fields(node.get("user"));
+    let parent_id = node
+        .get("parent")
+        .and_then(|parent| string_field(parent, "id"))
+        .unwrap_or_default();
+    Some(ParsedLinearComment {
+        id: id.clone(),
+        parent_id,
+        comment: LinearIssueComment {
+            id,
+            kind: "comment".into(),
+            author: author.unwrap_or_default(),
+            author_avatar_url,
+            body: string_field(node, "body").unwrap_or_default(),
+            created_at: string_field(node, "createdAt").unwrap_or_default(),
+            url: string_field(node, "url").unwrap_or_default(),
+            state: String::new(),
+            path: String::new(),
+            line: None,
+            resolved: false,
+            thread_id: String::new(),
+            replies: Vec::new(),
+        },
+    })
+}
+
+fn nest_linear_comments(mut rows: Vec<ParsedLinearComment>) -> Vec<LinearIssueComment> {
+    rows.sort_by(|left, right| left.comment.created_at.cmp(&right.comment.created_at));
+    let ids: HashSet<String> = rows.iter().map(|row| row.id.clone()).collect();
+    let mut parent_of = HashMap::new();
+    for row in &rows {
+        if !row.parent_id.is_empty() && ids.contains(&row.parent_id) {
+            parent_of.insert(row.id.clone(), row.parent_id.clone());
+        }
+    }
+    let mut top = Vec::new();
+    let mut replies: HashMap<String, Vec<LinearIssueComment>> = HashMap::new();
+    for row in rows {
+        let root = linear_comment_root(&row.id, &parent_of);
+        if root == row.id {
+            top.push(row.comment);
+        } else {
+            replies.entry(root).or_default().push(row.comment);
+        }
+    }
+    for comment in &mut top {
+        if let Some(children) = replies.remove(&comment.id) {
+            comment.replies = children;
+        }
+    }
+    top
+}
+
+fn linear_comment_root(id: &str, parent_of: &HashMap<String, String>) -> String {
+    let mut current = id.to_string();
+    let mut seen = HashSet::new();
+    while let Some(parent) = parent_of.get(&current) {
+        if !seen.insert(current.clone()) {
+            break;
+        }
+        current = parent.clone();
+    }
+    current
+}
+
+fn parse_linear_comment_create(data: &Value) -> Result<String, String> {
+    let payload = data
+        .get("commentCreate")
+        .ok_or_else(|| "Linear did not return a comment".to_string())?;
+    let success = payload
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !success {
+        return Err("Could not post Linear comment".into());
+    }
+    Ok(payload
+        .get("comment")
+        .and_then(|comment| string_field(comment, "url"))
+        .unwrap_or_default())
+}
+
+fn valid_linear_id(id: &str) -> bool {
+    let id = id.trim();
+    !id.is_empty()
+        && id.len() < 128
+        && id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
 }
 
 fn parse_labels(node: &Value) -> Vec<LinearLabel> {
@@ -556,6 +799,7 @@ mod tests {
                     "updatedAt": "2026-08-27T10:00:00.000Z",
                     "state": { "name": "In Progress", "type": "started" },
                     "team": { "id": "t1", "key": "ENG", "name": "Engineering" },
+                    "project": { "id": "p1", "name": "Billing" },
                     "labels": { "nodes": [{ "name": "bug", "color": "#eb5757" }] },
                     "assignee": { "displayName": "Maya", "name": "maya", "avatarUrl": "https://uploads.linear.app/maya.png" }
                 }]
@@ -573,6 +817,8 @@ mod tests {
         assert_eq!(item.repo, "ENG");
         assert_eq!(item.team_id, "t1");
         assert_eq!(item.team_name, "Engineering");
+        assert_eq!(item.project_id, "p1");
+        assert_eq!(item.project_name, "Billing");
         assert_eq!(item.labels[0].color, "eb5757");
         assert_eq!(item.assignees[0].login, "Maya");
         assert_eq!(
@@ -580,6 +826,26 @@ mod tests {
             "https://uploads.linear.app/maya.png"
         );
         assert!(item.project_path.is_empty());
+    }
+
+    #[test]
+    fn parse_linear_issues_leaves_project_empty_when_unassigned() {
+        let data = json!({
+            "issues": {
+                "nodes": [{
+                    "id": "issue-2",
+                    "identifier": "ENG-10",
+                    "number": 10,
+                    "title": "Loose issue",
+                    "team": { "id": "t1", "key": "ENG", "name": "Engineering" },
+                    "project": Value::Null
+                }]
+            }
+        });
+        let items = parse_linear_issues(&data).unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(items[0].project_id.is_empty());
+        assert!(items[0].project_name.is_empty());
     }
 
     #[test]
@@ -598,6 +864,73 @@ mod tests {
             details.author_avatar_url,
             "https://uploads.linear.app/ada.png"
         );
+    }
+
+    #[test]
+    fn parse_linear_issue_thread_nests_replies() {
+        let data = json!({
+            "issue": {
+                "comments": {
+                    "pageInfo": { "hasNextPage": true },
+                    "nodes": [
+                        {
+                            "id": "c2",
+                            "body": "Reply",
+                            "createdAt": "2026-08-31T11:00:00.000Z",
+                            "url": "https://linear.app/acme/issue/ENG-9#comment-c2",
+                            "user": { "displayName": "Maya" },
+                            "parent": { "id": "c1" }
+                        },
+                        {
+                            "id": "c1",
+                            "body": "Root",
+                            "createdAt": "2026-08-31T10:00:00.000Z",
+                            "url": "https://linear.app/acme/issue/ENG-9#comment-c1",
+                            "user": { "name": "Ada", "avatarUrl": "https://uploads.linear.app/ada.png" }
+                        },
+                        {
+                            "id": "c3",
+                            "body": "Nested reply",
+                            "createdAt": "2026-08-31T11:30:00.000Z",
+                            "user": { "displayName": "Lin" },
+                            "parent": { "id": "c2" }
+                        }
+                    ]
+                }
+            }
+        });
+        let thread = parse_linear_issue_thread(&data).unwrap();
+        assert!(thread.truncated);
+        assert_eq!(thread.comments.len(), 1);
+        assert_eq!(thread.comments[0].author, "Ada");
+        assert_eq!(thread.comments[0].body, "Root");
+        assert_eq!(thread.comments[0].replies.len(), 2);
+        assert_eq!(thread.comments[0].replies[0].body, "Reply");
+        assert_eq!(thread.comments[0].replies[1].body, "Nested reply");
+    }
+
+    #[test]
+    fn parse_linear_comment_create_reads_url() {
+        let data = json!({
+            "commentCreate": {
+                "success": true,
+                "comment": { "id": "c9", "url": "https://linear.app/acme/issue/ENG-9#comment-c9" }
+            }
+        });
+        assert_eq!(
+            parse_linear_comment_create(&data).unwrap(),
+            "https://linear.app/acme/issue/ENG-9#comment-c9"
+        );
+        assert!(
+            parse_linear_comment_create(&json!({ "commentCreate": { "success": false } })).is_err()
+        );
+    }
+
+    #[test]
+    fn valid_linear_id_allows_uuids() {
+        assert!(valid_linear_id("a1b2c3d4-e5f6-7890-abcd-ef1234567890"));
+        assert!(!valid_linear_id(""));
+        assert!(!valid_linear_id("id with space"));
     }
 
     #[test]
