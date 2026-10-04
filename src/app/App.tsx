@@ -1909,9 +1909,12 @@ function Workspace({
         next.delete(key);
         return next;
       });
+      const requestedAt = Date.now();
       const pending = listSessionsByProject(cwd)
         .then((rows) => {
-          setHistory((current) => replaceProjectHistory(current, cwd, rows));
+          setHistory((current) =>
+            replaceProjectHistory(current, cwd, rows, requestedAt),
+          );
           setLoadedProjects((prev) =>
             prev.has(key) ? prev : new Set(prev).add(key),
           );
@@ -1976,9 +1979,7 @@ function Workspace({
       .then((summary) => {
         if (!summary) return;
         lastPersisted.current.set(session.id, fingerprint);
-        if (summary.cwd === sidebarCwdRef.current) {
-          setHistory((current) => mergeProjectHistorySummary(current, summary));
-        }
+        setHistory((current) => mergeProjectHistorySummary(current, summary));
       })
       .catch(() => undefined);
   }, []);
@@ -2044,11 +2045,7 @@ function Workspace({
           const summary = await upsertSession(session).catch(() => null);
           if (!summary) return;
           lastPersisted.current.set(session.id, fingerprint);
-          if (summary.cwd === sidebarCwdRef.current) {
-            setHistory((current) =>
-              mergeProjectHistorySummary(current, summary),
-            );
-          }
+          setHistory((current) => mergeProjectHistorySummary(current, summary));
         }),
       );
     }, 650);
@@ -5829,6 +5826,7 @@ function Workspace({
             ? {
                 ...session,
                 title,
+                updatedAt: Date.now(),
                 blocks: [
                   ...session.blocks,
                   {
@@ -6389,6 +6387,7 @@ function Workspace({
               return {
                 ...next,
                 title: titled,
+                updatedAt: Date.now(),
                 pendingSwitch: undefined,
                 busy: false,
                 blocks: [
@@ -7807,7 +7806,11 @@ function Workspace({
             };
         const blocks = session.blocks.slice();
         blocks[blockIndex] = nextBlock;
-        updatedSession = { ...session, blocks };
+        updatedSession = {
+          ...session,
+          blocks,
+          updatedAt: Math.max(session.updatedAt ?? 0, nextThread.updatedAt),
+        };
         return updatedSession;
       });
       if (!updatedSession) return undefined;
@@ -7843,7 +7846,11 @@ function Workspace({
         };
         const blocks = session.blocks.slice();
         blocks[blockIndex] = nextBlock;
-        updatedSession = { ...session, blocks };
+        updatedSession = {
+          ...session,
+          blocks,
+          updatedAt: Math.max(session.updatedAt ?? 0, Date.now()),
+        };
         return updatedSession;
       });
       if (!updatedSession) return undefined;

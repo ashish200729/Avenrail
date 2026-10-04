@@ -21,6 +21,7 @@ import { taskListText } from "../../../features/sessions/model/taskList";
 import { isReviewablePlan } from "../../../features/sessions/model/plan";
 import { resolveModel } from "../../../features/sessions/model/models";
 import type { HarnessEvent } from "./types";
+import { touchSessionActivity } from "../../../features/sessions/model/sessionActivity";
 
 /** Apply one delivery batch without copying the transcript for every token. */
 export function applyHarnessEvents(
@@ -31,7 +32,7 @@ export function applyHarnessEvents(
   for (let index = 0; index < events.length; index++) {
     const event = events[index];
     if (event.type !== "message.delta" && event.type !== "reasoning.delta") {
-      next = applyHarnessEvent(next, event);
+      next = reduceHarnessEvent(next, event);
       continue;
     }
     const texts = [event.text];
@@ -48,13 +49,18 @@ export function applyHarnessEvents(
       true,
     );
   }
-  return next;
+  return next.blocks === session.blocks ? next : touchSessionActivity(next);
 }
 
 export function applyHarnessEvent(
   session: Session,
   event: HarnessEvent,
 ): Session {
+  const next = reduceHarnessEvent(session, event);
+  return next.blocks === session.blocks ? next : touchSessionActivity(next);
+}
+
+function reduceHarnessEvent(session: Session, event: HarnessEvent): Session {
   switch (event.type) {
     case "message.delta":
       return patchStreaming(session, "assistant", event.text, true);
@@ -458,7 +464,7 @@ export function appendUser(
   attachments: Attachment[] = [],
   extra?: UserTurnExtra,
 ): Session {
-  session = settlePendingApprovals(session);
+  session = touchSessionActivity(settlePendingApprovals(session));
   return appendBlock(
     { ...session, busy: true },
     {
@@ -481,7 +487,7 @@ export function appendSteerUser(
   extra?: UserTurnExtra,
 ): Session {
   return {
-    ...session,
+    ...touchSessionActivity(session),
     busy: true,
     blocks: [
       ...session.blocks,
@@ -501,7 +507,7 @@ export function stopStreaming(session: Session, endedAt = Date.now()): Session {
   const { backgroundTasks: _cleared, ...settled } =
     settlePendingApprovals(session);
   return {
-    ...settled,
+    ...(session.busy ? touchSessionActivity(settled, endedAt) : settled),
     busy: false,
     pendingQuestion: undefined,
     blocks: stampTurnDuration(settled.blocks.map(stopBlockProgress), endedAt),

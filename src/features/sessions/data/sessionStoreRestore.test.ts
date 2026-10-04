@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionRecord } from "./sessionStore";
 
 const invoke = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invoke(...args),
+}));
 
 const { getSession } = await import("./sessionStore");
 
@@ -41,7 +43,8 @@ describe("restoring a session whose repair cannot be persisted", () => {
   it("still returns the repaired session when the write fails", async () => {
     invoke.mockImplementation((cmd: string) => {
       if (cmd === "session_get") return Promise.resolve(codexRecord());
-      if (cmd === "session_upsert") return Promise.reject(new Error("db locked"));
+      if (cmd === "session_upsert")
+        return Promise.reject(new Error("db locked"));
       return Promise.resolve(null);
     });
 
@@ -52,6 +55,17 @@ describe("restoring a session whose repair cannot be persisted", () => {
     expect(session?.blocks[1].text).toBe("Find files");
   });
 
+  it("retains saved creation/activity times when opening a conversation", async () => {
+    invoke.mockResolvedValue({
+      ...codexRecord(),
+      createdAt: 1000,
+      updatedAt: 2000,
+    });
+    const session = await getSession("s1");
+    expect(session?.createdAt).toBe(1000);
+    expect(session?.updatedAt).toBe(2000);
+  });
+
   it("persists the repair when the write succeeds", async () => {
     invoke.mockImplementation((cmd: string) => {
       if (cmd === "session_get") return Promise.resolve(codexRecord());
@@ -60,8 +74,8 @@ describe("restoring a session whose repair cannot be persisted", () => {
 
     const session = await getSession("s1");
     expect(session?.blocks[1].text).toBe("Find files");
-    expect(
-      invoke.mock.calls.some(([cmd]) => cmd === "session_upsert"),
-    ).toBe(true);
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "session_upsert")).toBe(
+      true,
+    );
   });
 });

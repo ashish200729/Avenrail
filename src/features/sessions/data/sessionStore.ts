@@ -1124,6 +1124,8 @@ function recordToSession(record: SessionRecord): Session {
         : {},
     runtimeMode: asRuntimeMode(record.runtimeMode),
     title: record.title,
+    createdAt: sanitizeTimestamp(record.createdAt),
+    updatedAt: sanitizeTimestamp(record.updatedAt),
     blocks,
     busy: false,
     orchestrationLeadId:

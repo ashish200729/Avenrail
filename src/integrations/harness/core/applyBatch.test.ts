@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+beforeEach(() => vi.spyOn(Date, "now").mockReturnValue(1000));
+afterEach(() => vi.restoreAllMocks());
 import {
   newSession,
   type Session,

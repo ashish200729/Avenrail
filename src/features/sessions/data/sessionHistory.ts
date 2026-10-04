@@ -10,6 +10,7 @@ import {
   type Session,
 } from "../model/session";
 import { shouldPersistSession, type SessionSummary } from "./sessionStore";
+import { sessionActivityAt } from "../model/sessionActivity";
 
 export type SessionGitHint = {
   repo?: string;
@@ -30,6 +31,7 @@ export function mergeHistorySummary(
   summary: SessionSummary,
 ): SessionSummary[] {
   const previous = current.find((entry) => entry.id === summary.id);
+  if (previous && previous.updatedAt > summary.updatedAt) return current;
   const next = {
     ...summary,
     archived: summary.archived ?? previous?.archived,
@@ -54,9 +56,34 @@ export function replaceProjectHistory(
   current: SessionSummary[],
   cwd: string,
   rows: SessionSummary[],
+  requestedAt?: number,
 ): SessionSummary[] {
   const others = current.filter((entry) => !sameProjectPath(entry.cwd, cwd));
-  return [...others, ...rows];
+  const cached = new Map(current.map((entry) => [entry.id, entry]));
+  const fetchedIds = new Set(rows.map((row) => row.id));
+  // A read started before a first save can finish afterward. Keep records
+  // created during that read, even if their tabs have already closed.
+  const createdDuringRead =
+    requestedAt == null
+      ? []
+      : current.filter(
+          (row) =>
+            sameProjectPath(row.cwd, cwd) &&
+            !fetchedIds.has(row.id) &&
+            row.createdAt >= requestedAt,
+        );
+  return [
+    ...others,
+    ...rows.map((row) => {
+      const previous = cached.get(row.id);
+      return previous &&
+        sameProjectPath(previous.cwd, cwd) &&
+        previous.updatedAt > row.updatedAt
+        ? previous
+        : row;
+    }),
+    ...createdDuringRead,
+  ];
 }
 
 /**
@@ -68,6 +95,8 @@ export function mergeProjectHistorySummary(
   current: SessionSummary[],
   summary: SessionSummary,
 ): SessionSummary[] {
+  const previous = current.find((entry) => entry.id === summary.id);
+  if (previous && previous.updatedAt > summary.updatedAt) return current;
   const mine: SessionSummary[] = [];
   const others: SessionSummary[] = [];
   for (const entry of current) {
@@ -124,8 +153,8 @@ export function summaryFromSession(
       ? { branch: session.branch || git?.branch }
       : {}),
     ...(git?.repo ? { repo: git.repo } : {}),
-    createdAt: 0,
-    updatedAt: Date.now(),
+    createdAt: session.createdAt ?? 0,
+    updatedAt: sessionActivityAt(session),
   };
 }
 
@@ -187,10 +216,16 @@ export function historyWithLiveSessions(
       const stored = rows[storedIndex];
       const draft = !!sessionDraftBlock(session);
       const automationId = session.automationId || stored.automationId;
-      if (!!stored.draft !== draft || stored.automationId !== automationId) {
+      const updatedAt = Math.max(stored.updatedAt, sessionActivityAt(session));
+      if (
+        !!stored.draft !== draft ||
+        stored.automationId !== automationId ||
+        stored.updatedAt !== updatedAt
+      ) {
         rows[storedIndex] = {
           ...stored,
           draft: draft || undefined,
+          updatedAt,
           ...(automationId ? { automationId } : {}),
         };
       }

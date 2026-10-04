@@ -4,7 +4,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { writeFileSync } from "node:fs";
 import { Sidebar } from "./Sidebar";
-import { formatSessionTitle } from "../../features/sessions/model/session";
+import {
+  formatSessionTitle,
+  newSession,
+} from "../../features/sessions/model/session";
+import {
+  historyWithLiveSessions,
+  summaryFromSession,
+} from "../../features/sessions/data/sessionHistory";
+import {
+  appendUser,
+  applyHarnessEvents,
+} from "../../integrations/harness/core/apply";
 
 vi.mock("../../features/source-control/hooks/useProjectDiffStats", () => ({
   useProjectDiffStats: () => ({ files: 1, additions: 5, deletions: 2 }),
@@ -88,7 +99,54 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   localStorage.clear();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+it("moves a started saved session above blank tabs and keeps the order stable on unrelated renders", async () => {
+  const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+  const blank = newSession("codex", alpha);
+  const saved = { ...summary("active", alpha), createdAt: 100, updatedAt: 500 };
+  let live = {
+    ...newSession("codex", alpha),
+    id: "active",
+    createdAt: 100,
+    updatedAt: 500,
+    blocks: [{ id: "old", role: "user" as const, text: "Old turn" }],
+  };
+  const updateRows = () => {
+    props = {
+      ...props,
+      sessions: [saved],
+      allSessions: historyWithLiveSessions([saved], [live], alpha),
+      openSessions: [summaryFromSession(blank)],
+      activeSessionId: "active",
+      busySessionIds: live.busy ? new Set(["active"]) : new Set(),
+    };
+  };
+  const order = () =>
+    Array.from(
+      project(alpha).querySelectorAll<HTMLElement>("[data-session-card]"),
+      (card) => card.dataset.sessionCard,
+    );
+  updateRows();
+  await render();
+  expect(order()).toEqual([blank.id, "active"]);
+  clock.mockReturnValue(2000);
+  live = appendUser(live, "Continue");
+  updateRows();
+  await render();
+  expect(order()).toEqual(["active", blank.id]);
+  clock.mockReturnValue(3000);
+  live = applyHarnessEvents(live, [{ type: "message.delta", text: "Reply" }]);
+  updateRows();
+  await render();
+  expect(order()).toEqual(["active", blank.id]);
+  clock.mockReturnValue(9000);
+  updateRows();
+  await render();
+  expect(order()).toEqual(["active", blank.id]);
+  expect(props.onSelectSession).not.toHaveBeenCalled();
 });
 
 it("shows one project rail with nested sessions and no duplicate Workspace, Explorer, or Changes selectors", async () => {

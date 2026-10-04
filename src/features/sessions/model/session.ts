@@ -404,6 +404,9 @@ export type Session = {
   modelSettings: Record<string, string>;
   runtimeMode: RuntimeMode;
   title: string;
+  /** Stable creation/activity times; optional for older transferred snapshots. */
+  createdAt?: number;
+  updatedAt?: number;
   /** Project / working directory for this session. */
   cwd: string;
   blocks: Block[];
@@ -513,6 +516,7 @@ export function newSession(
   modelSettings?: Record<string, string>,
 ): Session {
   const resolved = resolveModel(harness, model ?? preferredModelId(harness));
+  const createdAt = Date.now();
   return {
     id: crypto.randomUUID(),
     harness,
@@ -520,6 +524,8 @@ export function newSession(
     modelSettings: preferredModelSettings(resolved, modelSettings),
     runtimeMode,
     title: HARNESS_LABEL[harness],
+    createdAt,
+    updatedAt: createdAt,
     cwd,
     blocks: [],
   };

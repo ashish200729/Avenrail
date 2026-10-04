@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { appendUser } from "../../../integrations/harness/core/apply";
 import {
   CONTINUE_PROMPT,
@@ -59,7 +59,9 @@ describe("project return snapshots", () => {
       path: "remote://env/repo/src/index.ts",
       cwd: project,
     });
-    expect(restored?.tabs[0].editorPanes[0].files[0].remoteFile).toBeUndefined();
+    expect(
+      restored?.tabs[0].editorPanes[0].files[0].remoteFile,
+    ).toBeUndefined();
     const malformed = JSON.parse(JSON.stringify(snapshot));
     malformed.tabs[0].editorPanes[0].files[0].remoteFile = { machineId: 42 };
     expect(parseWorkspaceSnapshot(malformed)).toBeNull();
@@ -208,6 +210,39 @@ describe("project return snapshots", () => {
 });
 
 describe("collectWorkspaceSnapshot", () => {
+  it("restores a blank tab's original activity time without saving streaming timestamps", () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+    try {
+      const blank = newSession("codex", "/repo");
+      const tab = newTab(blank.id);
+      const snapshot = collectWorkspaceSnapshot(
+        [tab],
+        [blank],
+        tab.id,
+        blank.cwd,
+        new Map(),
+      );
+      clock.mockReturnValue(9000);
+      const restored = hydrateWorkspaceSnapshot(
+        JSON.parse(JSON.stringify(snapshot)),
+        new Map(),
+      )!.sessions[0];
+      expect(restored.createdAt).toBe(1000);
+      expect(restored.updatedAt).toBe(1000);
+      const running = appendUser(restored, "Start");
+      const active = collectWorkspaceSnapshot(
+        [tab],
+        [running],
+        tab.id,
+        blank.cwd,
+        new Map(),
+      );
+      expect(active.sessions[0].createdAt).toBe(1000);
+      expect(active.sessions[0].updatedAt).toBeUndefined();
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it("stores tabs, stubs, and the focused tab — not transcripts", () => {
     const session = chat("s1", "/tmp/a");
     session.worktreeCwd = "/tmp/a-worktrees/feature";

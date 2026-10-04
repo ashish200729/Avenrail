@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   historyWithLiveSessions,
   filterSessionsByArchive,
@@ -6,10 +6,17 @@ import {
   mergeHistorySummary,
   mergeProjectHistorySummary,
   replaceProjectHistory,
+  summaryFromSession,
 } from "./sessionHistory";
+import {
+  appendUser,
+  stopStreaming,
+} from "../../../integrations/harness/core/apply";
 import { newSession } from "../model/session";
 import type { SessionSummary } from "./sessionStore";
 import type { OrchestrationRun } from "../../orchestration/model/orchestration";
+
+afterEach(() => vi.restoreAllMocks());
 
 function summary(id: string, cwd: string, updatedAt = 1): SessionSummary {
   return {
@@ -25,6 +32,84 @@ function summary(id: string, cwd: string, updatedAt = 1): SessionSummary {
     deletions: 0,
   };
 }
+
+describe("session recency", () => {
+  it("keeps blank tabs stable across renders and moves a resumed chat before save completion", () => {
+    const cwd = "/tmp/project-a";
+    const clock = vi.spyOn(Date, "now").mockReturnValue(2000);
+    const blank = newSession("codex", cwd);
+    const saved = summary("active", cwd, 500);
+    const older = {
+      ...newSession("cursor", cwd),
+      id: "active",
+      createdAt: 100,
+      updatedAt: 500,
+      blocks: [{ id: "old", role: "user" as const, text: "Earlier turn" }],
+    };
+    clock.mockReturnValue(3000);
+    const started = appendUser(older, "Continue");
+    let rows = historyWithLiveSessions(
+      [summary("recent", cwd, 1500), saved],
+      [started],
+      cwd,
+    );
+    expect(rows.map((row) => row.id)).toEqual(["active", "recent"]);
+    expect(rows[0].updatedAt).toBe(3000);
+    expect(rows[0].createdAt).toBe(500);
+    clock.mockReturnValue(9000);
+    expect(summaryFromSession(blank).updatedAt).toBe(2000);
+    expect(historyWithLiveSessions([saved], [older], cwd)[0].updatedAt).toBe(
+      500,
+    );
+    rows = historyWithLiveSessions(
+      [saved],
+      [stopStreaming(started, 4000)],
+      cwd,
+    );
+    expect(rows[0].updatedAt).toBe(4000);
+    const persisted = { ...rows[0], updatedAt: 4500 };
+    expect(
+      historyWithLiveSessions([persisted], [started], cwd)[0].updatedAt,
+    ).toBe(4500);
+    expect(historyWithLiveSessions([persisted], [], cwd)[0].updatedAt).toBe(
+      4500,
+    );
+  });
+
+  it("rejects stale write receipts and preserves newer cached timestamps during refresh", () => {
+    const current = [
+      summary("active", "/tmp/project-a", 3000),
+      summary("other", "/tmp/project-b", 1000),
+    ];
+    expect(
+      mergeHistorySummary(current, summary("active", "/tmp/project-a", 2000)),
+    ).toBe(current);
+    expect(
+      mergeProjectHistorySummary(
+        current,
+        summary("active", "/tmp/project-b", 2000),
+      ),
+    ).toBe(current);
+    const refreshed = replaceProjectHistory(current, "/tmp/project-a", [
+      summary("active", "/tmp/project-a", 2000),
+    ]);
+    expect(refreshed.find((row) => row.id === "active")?.updatedAt).toBe(3000);
+    expect(refreshed.find((row) => row.id === "other")?.updatedAt).toBe(1000);
+  });
+
+  it("retains first saves that completed during a refresh without reviving older deleted rows", () => {
+    const current = [
+      summary("saved-during-read", "/tmp/project-a", 3000),
+      summary("deleted", "/tmp/project-a", 1000),
+      summary("other", "/tmp/project-b", 1000),
+    ];
+    const rows = replaceProjectHistory(current, "/tmp/project-a", [], 2000);
+    expect(rows.map((row) => row.id)).toEqual(["other", "saved-during-read"]);
+    expect(
+      replaceProjectHistory(current, "/tmp/project-a", []).map((row) => row.id),
+    ).toEqual(["other"]);
+  });
+});
 
 describe("historyWithLiveSessions", () => {
   const run: OrchestrationRun = {
