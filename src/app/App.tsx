@@ -10628,7 +10628,7 @@ function Workspace({
           }`}
         >
           {compactTitleBar ? workspaceTitleBar : null}
-          <div className="flex min-h-0 min-w-0 flex-1">
+          <div data-workspace-shell className="flex min-h-0 min-w-0 flex-1">
             <Sidebar
               cwd={sidebarCwd}
               gitCwd={gitCwd}
@@ -10799,9 +10799,10 @@ function Workspace({
                 ) : null}
                 {compactTitleBar ? null : workspaceTitleBar}
 
-                <main className="relative flex min-h-0 min-w-0 flex-1">
+                <main className="@container/workspace-layout relative flex min-h-0 min-w-0 flex-1">
                   <div
                     ref={dockGridRef}
+                    data-workspace-chat
                     className="grid h-full min-h-0 min-w-0 flex-1"
                   >
                     <div

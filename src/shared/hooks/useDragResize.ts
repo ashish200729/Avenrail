@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -11,14 +12,15 @@ import { suppressTextSelection } from "../lib/drag";
 type Options = {
   min: number;
   direction?: "left" | "right";
-  max: () => number;
+  max: (pane: HTMLElement | null) => number;
+  observeBounds?: (pane: HTMLElement) => Element | null;
   defaultWidth: number;
   initial: number;
   onCommit?: (width: number) => void;
 };
 
 function clampTo(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, Math.round(value)));
+  return Math.min(Math.max(min, max), Math.max(min, Math.round(value)));
 }
 
 /** Drag a pane's width by writing the DOM directly so React re-renders can't fight the cursor. */
@@ -29,7 +31,9 @@ export function useDragResize({
   defaultWidth,
   initial,
   onCommit,
+  observeBounds,
 }: Options) {
+  const paneRef = useRef<HTMLElement | null>(null);
   const minRef = useRef(min);
   minRef.current = min;
   const maxRef = useRef(max);
@@ -40,14 +44,37 @@ export function useDragResize({
   defaultRef.current = defaultWidth;
 
   const clamp = useCallback((value: number) => {
-    return clampTo(value, minRef.current, maxRef.current());
+    return clampTo(value, minRef.current, maxRef.current(paneRef.current));
   }, []);
 
   const [width, setWidth] = useState(() => clamp(initial));
   const [dragging, setDragging] = useState(false);
-  const paneRef = useRef<HTMLElement | null>(null);
   const widthRef = useRef(width);
   const stopDrag = useRef<(() => void) | null>(null);
+
+  useLayoutEffect(() => {
+    const pane = paneRef.current;
+    if (!pane || !observeBounds) return;
+    const syncBounds = () => {
+      const next = clamp(widthRef.current);
+      if (next === widthRef.current) return;
+      widthRef.current = next;
+      pane.style.width = `${next}px`;
+      setWidth(next);
+    };
+    syncBounds();
+    const container = observeBounds(pane);
+    const observer =
+      container && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(syncBounds)
+        : null;
+    if (container) observer?.observe(container);
+    window.addEventListener("resize", syncBounds);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", syncBounds);
+    };
+  }, [clamp, observeBounds]);
 
   const apply = (next: number) => {
     widthRef.current = next;
@@ -74,7 +101,8 @@ export function useDragResize({
     const handle = event.currentTarget;
     const pointerId = event.pointerId;
     const startX = event.clientX;
-    const startW = widthRef.current;
+    const startW =
+      paneRef.current?.getBoundingClientRect().width || widthRef.current;
     handle.setPointerCapture(pointerId);
     setDragging(true);
     const restoreSelection = suppressTextSelection();
@@ -128,7 +156,7 @@ export function useDragResize({
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     if (event.key === "Home") commit(minRef.current);
-    else if (event.key === "End") commit(maxRef.current());
+    else if (event.key === "End") commit(maxRef.current(paneRef.current));
     else
       commit(
         widthRef.current +

@@ -19,6 +19,10 @@ import {
   type ReactNode,
 } from "react";
 import { useDragResize } from "../../../shared/hooks/useDragResize";
+import {
+  chatPreservingMaxWidth,
+  chatResizeContainer,
+} from "../../../shared/lib/chatResizeBounds";
 import { useProjectDiffStats } from "../../source-control/hooks/useProjectDiffStats";
 import { useGitFileStatuses } from "../../source-control/hooks/useGitFileStatuses";
 import { useSortable } from "../../../shared/hooks/useSortable";
@@ -126,8 +130,15 @@ export function WorkspacePanel({
 }: Props) {
   const resize = useDragResize({
     min: WORKSPACE_PANEL_WIDTH_MIN,
-    max: () =>
-      Math.min(WORKSPACE_PANEL_WIDTH_MAX, Math.floor(window.innerWidth * 0.75)),
+    max: (pane) =>
+      chatPreservingMaxWidth(
+        pane,
+        Math.min(
+          WORKSPACE_PANEL_WIDTH_MAX,
+          Math.floor(window.innerWidth * 0.75),
+        ),
+      ),
+    observeBounds: chatResizeContainer,
     defaultWidth: WORKSPACE_PANEL_WIDTH_DEFAULT,
     initial: loadWorkspacePanelWidth(),
     onCommit: saveWorkspacePanelWidth,

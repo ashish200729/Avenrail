@@ -1823,7 +1823,7 @@ function ProjectSessionList({
             if (!embeddedSessions) sessionsLock(el);
             sessionsScrollRef.current = el;
           }}
-          className={`${embeddedSessions ? "min-w-0" : "min-h-0 flex-1 overflow-y-auto overscroll-none"} ${
+          className={`${embeddedSessions ? "min-w-0" : "sidebar-scroll min-h-0 flex-1 overflow-y-auto overscroll-none"} ${
             tab === "sessions" ? "" : "hidden"
           }`}
         >
@@ -3271,16 +3271,25 @@ const SessionCard = memo(function SessionCard({
       ? null
       : resolveModel(session.harness, session.model).name;
   const statusClass = needsApproval
-    ? "text-amber-400"
+    ? "text-amber-700 dark:text-amber-400"
     : busy
       ? "text-accent"
       : done
-        ? "text-emerald-400"
-        : draft
-          ? "text-content/55"
-          : "text-content/45";
+        ? "text-emerald-700 dark:text-emerald-400"
+        : "text-content/65";
   const status = (
     <span
+      data-session-status={
+        needsApproval
+          ? "approval"
+          : busy
+            ? "working"
+            : done
+              ? "done"
+              : draft
+                ? "draft"
+                : "idle"
+      }
       className={`flex shrink-0 items-center gap-1 text-[11px] tabular-nums ${statusClass}`}
     >
       {needsApproval ? (
@@ -3533,20 +3542,20 @@ const SessionCard = memo(function SessionCard({
             ? (event) => onContextMenu(session.id, event)
             : undefined
         }
-        className={`relative border flex w-full cursor-default select-none touch-none flex-col rounded-md px-2.5 text-left ${cardPaddingY} ${
+        className={`relative border flex w-full min-w-0 cursor-default select-none touch-none flex-col rounded-lg px-2.5 text-left focus-within:ring-2 focus-within:ring-accent/60 ${cardPaddingY} ${
           dragging ? "opacity-40" : ""
         } ${
           dropTarget
             ? "text-content border-transparent"
             : isSelected
-              ? `bg-accent/15 text-content ${draft ? "border-content/30 border-dashed" : "border-transparent"}`
+              ? `bg-accent/12 text-content ${draft ? "border-accent/30 border-dashed" : "border-accent/20"}`
               : needsApproval
-                ? "bg-content/20 text-content border-content/30 border-dashed"
+                ? "bg-amber-400/8 text-content border-amber-500/30 border-dashed"
                 : isActive
-                  ? `bg-selection text-content ${draft ? "border-content/30 border-dashed" : "border-transparent"}`
+                  ? `bg-selection text-content ${draft ? "border-content/30 border-dashed" : "border-content/8"}`
                   : draft
                     ? "border-content/25 border-dashed text-content/80 hover:bg-content/5 hover:text-content"
-                    : `text-content/80 hover:text-content border-transparent ${
+                    : `text-content/80 hover:text-content border-transparent hover:border-content/8 ${
                         orchestrationExpanded
                           ? "bg-content/5 hover:bg-content/10"
                           : "hover:bg-content/5"
@@ -3572,37 +3581,20 @@ const SessionCard = memo(function SessionCard({
             const focused = event.currentTarget.ownerDocument.activeElement;
             if (focused instanceof HTMLElement) focused.blur();
           }}
-          className="rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-accent/50"
+          className="min-w-0 rounded-sm outline-none"
         >
-          {compact && !orchestrationExpanded ? null : (
-            <span className="relative flex items-center gap-2">
-              <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                <HarnessIcon
-                  harness={session.harness}
-                  className="size-3.5 shrink-0"
-                />
-                <span className="min-w-0 truncate text-[11px] text-content/50">
-                  {model}
-                </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-1.5">
-                {linkedUpdateDot}
-                {status}
-              </span>
-            </span>
-          )}
-          <span
-            className={`relative flex min-w-0 items-center gap-1.5 ${
-              compact && !orchestrationExpanded ? "" : "mt-1"
-            }`}
-          >
+          <span className="relative flex min-w-0 items-start gap-2">
+            <HarnessIcon
+              harness={session.harness}
+              className="mt-0.5 size-4 shrink-0"
+            />
             {session.pinned ? (
               <Pin
                 className="size-3 shrink-0 text-content/45"
                 strokeWidth={1.75}
               />
             ) : null}
-            <span className="min-w-0 flex-1 line-clamp-1 text-[13px] font-semibold leading-snug text-content">
+            <span className="min-w-0 flex-1 line-clamp-2 text-[13px] font-medium leading-5 text-content">
               {title}
             </span>
             {compact && !orchestrationExpanded ? (
@@ -3612,6 +3604,20 @@ const SessionCard = memo(function SessionCard({
               </span>
             ) : null}
           </span>
+          {compact && !orchestrationExpanded ? null : (
+            <span className="relative mt-1 flex min-w-0 items-center gap-2 pl-6">
+              <span
+                className="min-w-0 flex-1 truncate text-[11px] leading-4 text-content/65"
+                title={model ?? undefined}
+              >
+                {model}
+              </span>
+              <span className="flex shrink-0 items-center gap-1.5">
+                {linkedUpdateDot}
+                {status}
+              </span>
+            </span>
+          )}
         </div>
         {orchestrationExpanded ? (
           <OrchestrationSidebarAgents
@@ -3619,10 +3625,10 @@ const SessionCard = memo(function SessionCard({
             summary={orchestration!}
           />
         ) : null}
-        <span className="relative mt-1 flex items-center gap-2">
+        <span className="relative mt-1 flex min-w-0 items-center gap-2 pl-6">
           {gitLabel ? (
             <span
-              className="flex min-w-0 flex-1 items-center gap-1 text-[11px] text-content/45"
+              className="flex min-w-0 flex-1 items-center gap-1 text-[11px] text-content/60"
               title={
                 session.worktreeCwd
                   ? `${gitLabel}\n${session.worktreeCwd}`
@@ -3818,7 +3824,7 @@ function SessionRenameRow({
 
   return (
     <div
-      className={`flex w-full flex-col rounded-md px-2.5 py-2 ${
+      className={`flex w-full min-w-0 flex-col rounded-lg px-2.5 py-2 ${
         needsApproval
           ? "bg-amber-400/10 text-content"
           : isActive

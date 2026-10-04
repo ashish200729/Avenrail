@@ -165,6 +165,35 @@ html:not(.is-mac) ::-webkit-scrollbar-corner {
   background: transparent;
 }
 
+/* Scope the compact scrollbar to project/session navigation, including macOS
+   with "Always show scroll bars" enabled. Editors keep their own scrollbars. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-content) 22%, transparent)
+    transparent;
+  scrollbar-gutter: stable;
+}
+@supports selector(::-webkit-scrollbar) {
+  .sidebar-scroll {
+    scrollbar-width: auto;
+  }
+}
+html .sidebar-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+html .sidebar-scroll::-webkit-scrollbar-track,
+html .sidebar-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+html .sidebar-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-content) 22%, transparent);
+  border-radius: 9999px;
+}
+html .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-content) 38%, transparent);
+}
+
 /* Tint-less transparent rather than `transparent`, which browsers interpolate
    through black and would dim the page on the way in and out of glass. */
 html.has-native-glass:not(.theme-light),
@@ -3173,9 +3202,18 @@ html.theme-light .btw-burst {
 
 /* Avenrail keeps editors and project terminals in its separate workspace panel. */
 .workspace-panel {
-  max-width: calc(100% - 360px);
+  max-width: calc(100% - 600px);
   container-type: inline-size;
   container-name: workspace;
+}
+@container workspace-layout (max-width: 1039px) {
+  .workspace-panel {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 30;
+    max-width: 100%;
+    box-shadow: -12px 0 24px hsl(0 0% 0% / 0.12);
+  }
 }
 .workspace-file-rail {
   width: clamp(220px, 31cqw, 300px);

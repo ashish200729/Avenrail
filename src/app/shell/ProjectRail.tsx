@@ -26,6 +26,10 @@ import {
   type ReactNode,
 } from "react";
 import { useDragResize } from "../../shared/hooks/useDragResize";
+import {
+  chatPreservingMaxWidth,
+  chatResizeContainer,
+} from "../../shared/lib/chatResizeBounds";
 import { useLockOverscroll } from "../../shared/hooks/useLockOverscroll";
 import { useProjectDiffStats } from "../../features/source-control/hooks/useProjectDiffStats";
 import { useAnimatedReorder } from "../../shared/hooks/useAnimatedReorder";
@@ -188,8 +192,12 @@ export function ProjectRail({
 }: Props) {
   const resize = useDragResize({
     min: PROJECT_RAIL_WIDTH_MIN,
-    max: () =>
-      Math.min(PROJECT_RAIL_WIDTH_MAX, Math.floor(window.innerWidth * 0.35)),
+    max: (pane) =>
+      chatPreservingMaxWidth(
+        pane,
+        Math.min(PROJECT_RAIL_WIDTH_MAX, Math.floor(window.innerWidth * 0.35)),
+      ),
+    observeBounds: chatResizeContainer,
     defaultWidth: PROJECT_RAIL_WIDTH_DEFAULT,
     initial: loadProjectRailWidth(),
     onCommit: saveProjectRailWidth,
@@ -459,7 +467,7 @@ export function ProjectRail({
                 lockOverscroll(el);
                 scrollRef.current = el;
               }}
-              className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2"
+              className="sidebar-scroll flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2"
             >
               {sections.pinned.length > 0 ? (
                 <ProjectSection
@@ -613,11 +621,13 @@ export function ProjectRail({
           aria-valuenow={resize.width}
           aria-valuemin={PROJECT_RAIL_WIDTH_MIN}
           aria-valuemax={PROJECT_RAIL_WIDTH_MAX}
-          className={`absolute inset-y-0 -right-px z-10 w-1.5 cursor-col-resize touch-none ${
+          tabIndex={0}
+          className={`absolute inset-y-0 -right-px z-10 w-1.5 cursor-col-resize touch-none focus-visible:bg-accent/40 ${
             resize.dragging ? "bg-content/15" : "hover:bg-content/10"
           }`}
           onPointerDown={resize.onPointerDown}
           onDoubleClick={resize.onDoubleClick}
+          onKeyDown={resize.onKeyDown}
         />
       </nav>
     </ProjectSessionsContext.Provider>
