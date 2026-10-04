@@ -62,7 +62,6 @@ type Props = {
   open: boolean;
   sidebarOpen?: boolean;
   onShowSidebar?: () => void;
-  onNewSession?: () => void;
   active: boolean;
   activeTabId: string;
   tabs: WorkspaceTab[];
@@ -99,7 +98,6 @@ export function WorkspacePanel({
   open,
   sidebarOpen = true,
   onShowSidebar,
-  onNewSession,
   active,
   activeTabId,
   tabs,
@@ -325,19 +323,6 @@ export function WorkspacePanel({
           <IconButton label={`Show sidebar (${MOD}B)`} onClick={onShowSidebar}>
             <PanelLeft className="size-3.5" strokeWidth={1.75} />
           </IconButton>
-        ) : null}
-        {!sidebarOpen && onNewSession ? (
-          <button
-            type="button"
-            title={`New session (${MOD}T)`}
-            aria-label={`New session (${MOD}T)`}
-            data-tauri-drag-region="false"
-            onClick={onNewSession}
-            className="mr-1 flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs text-content/65 hover:bg-content/8 hover:text-content focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <Plus className="size-3.5" strokeWidth={1.75} />
-            <span>New session</span>
-          </button>
         ) : null}
         {view.order.length === 0 ? (
           <span

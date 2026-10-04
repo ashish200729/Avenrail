@@ -1436,6 +1436,52 @@ describe("Composer question focus", () => {
     expect(textarea.value).toBe("");
   });
 
+  it.each([false, true])(
+    "keeps context beside Send with branch hidden: %s",
+    async (hideBranchPicker) => {
+      const props = {
+        focused: true,
+        harness: "claude" as const,
+        model: "claude-sonnet",
+        runtimeMode: "supervised" as const,
+        cwd: "/repo",
+        executionCwd: "/repo",
+        branch: "main",
+        context: { used: 176_000, window: 256_000 },
+        compactSupported: true,
+        onCompactContext: vi.fn(),
+        hideProjectPicker: true,
+        hideBranchPicker,
+        onWorktreeChange: vi.fn(async () => {}),
+        onFocus: vi.fn(),
+        onCwdChange: vi.fn(),
+        onModelChange: vi.fn(),
+        onRuntimeModeChange: vi.fn(),
+        onSubmit: vi.fn(),
+      };
+      await act(async () => root.render(createElement(Composer, props)));
+      const meter = container.querySelector("[data-context-meter]")!;
+      const send = container.querySelector('[aria-label="Send"]')!;
+      expect(meter.nextElementSibling).toBe(send);
+      expect(meter.parentElement).toBe(send.parentElement);
+      expect(
+        meter.querySelector("button")?.getAttribute("aria-label"),
+      ).toContain("69% context used");
+      // Usage alone must not insert an empty row between the field and controls.
+      const box = container.querySelector("[data-composer-box]")!;
+      expect(box.children).toHaveLength(2);
+      captureComposer(
+        container,
+        hideBranchPicker ? "context-no-branch" : "context",
+      );
+      await act(async () =>
+        root.render(createElement(Composer, { ...props, hideTopBar: true })),
+      );
+      expect(container.querySelector("[data-context-meter]")).toBeNull();
+      expect(container.querySelector('[aria-label="Send"]')).not.toBeNull();
+    },
+  );
+
   it("locks a started session to its worktree while keeping its branch editable", async () => {
     await act(async () =>
       root.render(
@@ -1472,6 +1518,13 @@ describe("Composer question focus", () => {
 
   it("reflows a draft on width changes without changing its text or selection", async () => {
     let onResize: ResizeObserverCallback;
+    let pendingResize: FrameRequestCallback | undefined;
+    const cancelFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      pendingResize = callback;
+      return 7;
+    });
+    vi.stubGlobal("cancelAnimationFrame", cancelFrame);
     const disconnect = vi.fn();
     const observe = vi.fn();
     vi.stubGlobal(
@@ -1517,13 +1570,17 @@ describe("Composer question focus", () => {
       configurable: true,
     });
     textarea.setSelectionRange(4, 11);
-    const resize = (width: number) =>
-      act(() =>
+    const resize = (width: number, flush = true) =>
+      act(() => {
         onResize(
           [{ target: box, contentRect: { width } } as ResizeObserverEntry],
           {} as ResizeObserver,
-        ),
-      );
+        );
+        if (flush && pendingResize) {
+          pendingResize(0);
+          pendingResize = undefined;
+        }
+      });
     resize(800);
     expect(observe).toHaveBeenCalledWith(box);
     expect(textarea.style.height).toBe("120px");
@@ -1544,8 +1601,14 @@ describe("Composer question focus", () => {
     expect(trigger.textContent).toBe(branch);
     expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
     captureComposer(container, "long-branch");
+    resize(640, false);
+    resize(700, false);
+    expect(cancelFrame).toHaveBeenCalledWith(7);
+    expect(height).not.toHaveBeenCalled();
+    cancelFrame.mockClear();
     await act(async () => root.render(null));
     expect(disconnect).toHaveBeenCalledOnce();
+    expect(cancelFrame).toHaveBeenCalledWith(7);
   });
 
   it("toggles a draft between the current checkout and a new worktree", async () => {

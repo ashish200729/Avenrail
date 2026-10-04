@@ -1030,14 +1030,24 @@ export function Composer({
     const box = boxRef.current;
     if (!box || typeof ResizeObserver === "undefined") return;
     let width = 0;
+    let frame: number | null = null;
     const observer = new ResizeObserver(([entry]) => {
       if (!entry || entry.contentRect.width <= 0) return;
       if (entry.contentRect.width === width) return;
       width = entry.contentRect.width;
-      if (ref.current) resizeComposer(ref.current);
+      // Changing the textarea height during observer delivery also changes the
+      // observed box height. Measure next frame to avoid a resize delivery loop.
+      if (frame !== null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        if (ref.current) resizeComposer(ref.current);
+      });
     });
     observer.observe(box);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, []);
 
   useEffect(() => {
@@ -2298,41 +2308,23 @@ export function Composer({
           </div>
 
           {hideTopBar ||
-          ((!looksLikeProject(cwd) || remote || hideProjectPicker) &&
-            !context) ? null : (
+          !looksLikeProject(cwd) ||
+          remote ||
+          hideProjectPicker ? null : (
             <div className="flex min-w-0 items-center gap-2.5 overflow-hidden px-3 pt-2.5">
-              {!remote && !hideProjectPicker ? (
-                <CwdPicker
-                  cwd={cwd}
-                  recents={recents}
-                  projectLogoPath={projectLogoPath}
-                  enabled={enabled}
-                  onCwdChange={onCwdChange}
-                  onNewTerminal={worktreeRemoved ? undefined : onNewTerminal}
-                  onClose={() => ref.current?.focus()}
-                />
-              ) : null}
-              <div className="ml-auto flex shrink-0 items-center">
-                <ContextMeter
-                  usage={context}
-                  onCompact={
-                    compactSupported && !worktreeRemoved
-                      ? onCompactContext
-                      : undefined
-                  }
-                  compactDisabled={busy}
-                />
-              </div>
+              <CwdPicker
+                cwd={cwd}
+                recents={recents}
+                projectLogoPath={projectLogoPath}
+                enabled={enabled}
+                onCwdChange={onCwdChange}
+                onNewTerminal={worktreeRemoved ? undefined : onNewTerminal}
+                onClose={() => ref.current?.focus()}
+              />
             </div>
           )}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-2 px-2 pb-2">
-            <div
-              className={`flex min-w-0 flex-1 items-start gap-1 ${
-                hideTopBar || hideBranchPicker
-                  ? ""
-                  : "@max-[560px]/composer:basis-full"
-              }`}
-            >
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 @max-[560px]/composer:basis-full">
               <div
                 ref={plusRef}
                 className={compact ? "hidden" : "relative shrink-0"}
@@ -2543,8 +2535,8 @@ export function Composer({
                   }}
                 />
               ) : null}
-              <div className="composer-toolbar flex min-w-0 flex-1 items-center">
-                <div className="flex min-w-0 flex-wrap items-center gap-1">
+              <div className="composer-toolbar contents">
+                <div className="contents">
                   <ModelPicker
                     harness={harness}
                     model={model}
@@ -2595,9 +2587,9 @@ export function Composer({
                 <span>Cancel edit</span>
               </button>
             ) : null}
-            <div className="ml-auto flex min-w-0 max-w-full items-center gap-1.5">
+            <div className="ml-auto flex min-w-0 max-w-full items-center justify-end gap-1.5 @max-[560px]/composer:basis-full">
               {!hideTopBar ? (
-                <div className="flex min-w-0 max-w-64 items-center gap-1">
+                <div className="flex min-w-0 max-w-64 items-center gap-1 @max-[560px]/composer:mr-auto">
                   {hideBranchPicker ? null : draftWorkspace &&
                     onWorkspaceModeChange &&
                     onWorktreeBaseChange ? (
@@ -2653,6 +2645,17 @@ export function Composer({
                     </>
                   )}
                 </div>
+              ) : null}
+              {!hideTopBar ? (
+                <ContextMeter
+                  usage={context}
+                  onCompact={
+                    compactSupported && !worktreeRemoved
+                      ? onCompactContext
+                      : undefined
+                  }
+                  compactDisabled={busy}
+                />
               ) : null}
               <ComposerAction
                 busy={busy}

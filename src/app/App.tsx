@@ -10875,7 +10875,6 @@ function Workspace({
                     active={workspacePanelOpen && !chromeSurfaceOpen}
                     sidebarOpen={projectRailOpen}
                     onShowSidebar={onToggleSidebar}
-                    onNewSession={onNew}
                     cwd={gitCwd || sidebarCwd}
                     activeTabId={activeTabId}
                     tabs={tabs}

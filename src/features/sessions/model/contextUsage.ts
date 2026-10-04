@@ -15,7 +15,13 @@ export type ContextUsage = {
 
 /** Fraction of the window in use, or null when the window is unknown. */
 export function contextRatio(usage: ContextUsage | undefined): number | null {
-  if (!usage || !usage.window || usage.window <= 0) return null;
+  if (
+    !usage ||
+    !usage.window ||
+    !Number.isFinite(usage.window) ||
+    usage.window <= 0
+  )
+    return null;
   if (!Number.isFinite(usage.used) || usage.used < 0) return null;
   return Math.min(1, usage.used / usage.window);
 }

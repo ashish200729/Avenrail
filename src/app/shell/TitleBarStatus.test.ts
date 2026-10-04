@@ -2,6 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { writeFileSync } from "node:fs";
 import { TitleBar, type Tab } from "./TitleBar";
 
 vi.mock("./WindowControls", () => ({ WindowControls: () => null }));
@@ -129,3 +130,49 @@ it.each([true, false])(
     expect(onToggleSidebar).not.toHaveBeenCalled();
   },
 );
+
+it.each([
+  { projectRailOpen: true, compactRail: false, cwd: "/project" },
+  { projectRailOpen: false, compactRail: false, cwd: "/project" },
+  { projectRailOpen: false, compactRail: true, cwd: "/project" },
+  { projectRailOpen: false, compactRail: false, cwd: "~" },
+])("keeps New session with conversation navigation: %j", (state) => {
+  const onNew = vi.fn();
+  act(() =>
+    root.render(
+      createElement(TitleBar, {
+        ...state,
+        sessionSidebarOpen: state.projectRailOpen,
+        tabs: [tab("active")],
+        activeId: "active",
+        onToggleSidebar: vi.fn(),
+        onToggleSessionSidebar: vi.fn(),
+        onNew,
+        onSelect: vi.fn(),
+        onClose: vi.fn(),
+        onCloseMany: vi.fn(),
+        onReorder: vi.fn(),
+      }),
+    ),
+  );
+  const actions = container.querySelectorAll<HTMLButtonElement>(
+    'button[aria-label^="New session"]',
+  );
+  expect(actions).toHaveLength(state.projectRailOpen ? 0 : 1);
+  if (!state.projectRailOpen) {
+    expect(actions[0].closest("[data-new-session-action]")).not.toBeNull();
+    const position = actions[0].compareDocumentPosition(
+      container.querySelector("[data-title-tab-id]")!,
+    );
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    act(() => actions[0].click());
+    expect(onNew).toHaveBeenCalledOnce();
+  }
+  const directory = process.env.AVENRAIL_COMPOSER_CAPTURE_DIR;
+  if (directory) {
+    writeFileSync(
+      `${directory}/title-${state.projectRailOpen ? "open" : state.compactRail ? "compact" : state.cwd === "~" ? "projectless" : "hidden"}.html`,
+      container.innerHTML,
+    );
+  }
+});

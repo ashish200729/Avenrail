@@ -25,6 +25,11 @@ describe("contextRatio", () => {
   it("rejects nonsense readings", () => {
     expect(contextRatio({ used: -5, window: 100 })).toBeNull();
     expect(contextRatio({ used: 10, window: 0 })).toBeNull();
+    expect(contextRatio({ used: 10, window: -100 })).toBeNull();
+    expect(contextRatio({ used: 10, window: Infinity })).toBeNull();
+    expect(contextRatio({ used: 10, window: NaN })).toBeNull();
+    expect(contextRatio({ used: Infinity, window: 100 })).toBeNull();
+    expect(contextRatio({ used: NaN, window: 100 })).toBeNull();
   });
 });
 

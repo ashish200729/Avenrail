@@ -880,9 +880,6 @@ function TitleBarComponent({
                 <IconButton label={`Go to File (${MOD}P)`} onClick={onGoToFile}>
                   <Search className="size-3.5" strokeWidth={1.75} />
                 </IconButton>
-                <IconButton label={`New session (${MOD}T)`} onClick={onNew}>
-                  <Plus className="size-3.5" strokeWidth={1.75} />
-                </IconButton>
               </>
             ) : null}
             {!projectRailOpen && !showCurrentProject && onOpenSettings ? (
@@ -940,11 +937,28 @@ function TitleBarComponent({
             <div className="w-[70px] shrink-0" />
           ) : null}
           <IconButton
-              label={`Toggle Sidebar (${MOD}B)`}
+            label={`Toggle Sidebar (${MOD}B)`}
             onClick={onToggleSessionSidebar}
           >
             <PanelLeft className="size-3.5" strokeWidth={1.75} />
           </IconButton>
+        </div>
+      ) : null}
+      {railClosed ? (
+        <div
+          className="flex shrink-0 items-center px-1.5"
+          data-new-session-action
+        >
+          <button
+            type="button"
+            title={`New session (${MOD}T)`}
+            aria-label={`New session (${MOD}T)`}
+            onClick={onNew}
+            className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-content/70 hover:bg-content/8 hover:text-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <Plus className="size-3.5" strokeWidth={1.75} />
+            <span>New session</span>
+          </button>
         </div>
       ) : null}
       {showProjectButton && onSelectProject ? (

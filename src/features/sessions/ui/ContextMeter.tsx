@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import {
   contextRatio,
   contextTooltip,
@@ -13,9 +13,9 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 /** Ring turns amber then red as the window fills. */
 function ringClass(ratio: number): string {
-  if (ratio >= 0.9) return "text-red-400";
-  if (ratio >= 0.75) return "text-amber-400";
-  return "text-content/45";
+  if (ratio >= 0.9) return "text-red-700 dark:text-red-400";
+  if (ratio >= 0.75) return "text-amber-700 dark:text-amber-400";
+  return "text-content/65";
 }
 
 /**
@@ -35,7 +35,9 @@ export function ContextMeter({
   compactDisabled?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [open, setOpen] = useState(false);
+  const popoverId = useId();
   const root = useRef<HTMLDivElement>(null);
   const ratio = contextRatio(usage);
   if (!usage || ratio === null) return null;
@@ -46,9 +48,12 @@ export function ContextMeter({
   return (
     <div
       ref={root}
-      className="relative shrink-0"
+      data-context-meter
+      className="relative grid size-7 shrink-0 place-items-center"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
     >
       {onCompact ? (
         <button
@@ -56,24 +61,43 @@ export function ContextMeter({
           title="Context usage"
           aria-label={`${headline}, ${detail}. Open context actions`}
           aria-expanded={actionsOpen}
+          aria-controls={actionsOpen ? popoverId : undefined}
           onClick={() => setOpen((value) => !value)}
-          className="-m-1 grid rounded-sm p-1 outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          className="grid size-7 place-items-center rounded-md hover:bg-content/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <MeterRing ratio={ratio} />
         </button>
       ) : (
-        <MeterRing ratio={ratio} label={`${headline}, ${detail}`} />
+        <div
+          role="img"
+          aria-label={`${headline}, ${detail}`}
+          tabIndex={0}
+          title={`${headline}, ${detail}`}
+          className="grid size-7 place-items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <MeterRing ratio={ratio} />
+        </div>
       )}
-      {hovered || actionsOpen ? (
+      {hovered || focused || actionsOpen ? (
         <Popover
+          id={popoverId}
           anchor={root}
           side="top"
           align="end"
-          onDismiss={onCompact ? () => setOpen(false) : undefined}
+          onDismiss={
+            actionsOpen
+              ? (reason) => {
+                  setOpen(false);
+                  if (reason === "escape") {
+                    root.current?.querySelector("button")?.focus();
+                  }
+                }
+              : undefined
+          }
           className={`w-max px-2.5 py-1.5 ${actionsOpen ? "" : "pointer-events-none"}`}
         >
           <div className="text-[12px] leading-4 text-content">{headline}</div>
-          <div className="text-[11px] leading-4 text-content/50">{detail}</div>
+          <div className="text-[12px] leading-4 text-content/65">{detail}</div>
           {actionsOpen ? (
             <button
               type="button"
@@ -85,9 +109,10 @@ export function ContextMeter({
               }
               onClick={() => {
                 setOpen(false);
+                root.current?.querySelector("button")?.focus();
                 onCompact?.();
               }}
-              className="mt-1.5 w-full rounded-md bg-content/10 px-2 py-1 text-[11px] text-content hover:bg-content/15 disabled:cursor-not-allowed disabled:opacity-40"
+              className="mt-1.5 w-full rounded-md bg-content/10 px-2 py-1 text-[12px] text-content hover:bg-content/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
             >
               Compact now
             </button>
@@ -98,16 +123,14 @@ export function ContextMeter({
   );
 }
 
-function MeterRing({ ratio, label }: { ratio: number; label?: string }) {
+function MeterRing({ ratio }: { ratio: number }) {
   return (
     <svg
       width={SIZE}
       height={SIZE}
       viewBox={`0 0 ${SIZE} ${SIZE}`}
       className={ringClass(ratio)}
-      role={label ? "img" : undefined}
-      aria-label={label}
-      aria-hidden={label ? undefined : true}
+      aria-hidden="true"
     >
       <circle
         cx={SIZE / 2}
