@@ -106,6 +106,7 @@ type ProjectSessionsLayout = {
   visible: boolean;
   onNew?: (path: string) => string | void;
   activeSessionId?: string;
+  searching?: boolean;
 };
 const ProjectSessionsContext = createContext<ProjectSessionsLayout | null>(
   null,
@@ -115,6 +116,8 @@ type Props = {
   onNew?: () => string | void;
   onNewProjectSession?: (path: string) => string | void;
   renderProjectSessions?: (path: string, visible: boolean) => ReactNode;
+  sessionControls?: ReactNode;
+  searchingSessions?: boolean;
   visible?: boolean;
   cwd: string;
   recents: RecentProject[];
@@ -155,6 +158,8 @@ export function ProjectRail({
   onNew,
   onNewProjectSession,
   renderProjectSessions,
+  sessionControls,
+  searchingSessions = false,
   visible = true,
   cwd,
   recents,
@@ -373,9 +378,16 @@ export function ProjectRail({
             onNew: onNewProjectSession,
             activeSessionId,
             visible,
+            searching: searchingSessions,
           }
         : null,
-    [renderProjectSessions, onNewProjectSession, activeSessionId, visible],
+    [
+      renderProjectSessions,
+      onNewProjectSession,
+      activeSessionId,
+      visible,
+      searchingSessions,
+    ],
   );
   return (
     <ProjectSessionsContext.Provider value={sessionLayout}>
@@ -462,6 +474,7 @@ export function ProjectRail({
               />
             </div>
 
+            {sessionControls}
             <div
               ref={(el) => {
                 lockOverscroll(el);
@@ -794,7 +807,8 @@ function ProjectGroupSection({
     "y",
   );
   const countLabel = `${items.length} ${items.length === 1 ? "project" : "projects"}`;
-  const expanded = !group.collapsed;
+  const sessionLayout = useContext(ProjectSessionsContext);
+  const expanded = !group.collapsed || Boolean(sessionLayout?.searching);
   const openMenu = (target: HTMLElement, x?: number, y?: number) => {
     const rect = target.getBoundingClientRect();
     onOpenGroupMenu(x ?? rect.left, y ?? rect.bottom);
@@ -952,6 +966,7 @@ function ProjectCard({
       return selected;
     }
   });
+  const showSessions = expanded || Boolean(sessionLayout?.searching);
   useEffect(() => {
     if (sessionLayout && selected) setExpanded(true);
   }, [selected, sessionLayout?.activeSessionId]);
@@ -1058,12 +1073,12 @@ function ProjectCard({
             muteStatus ? `${cardAriaLabel}, ${muteStatus}` : cardAriaLabel
           }
           aria-current={selected ? "true" : undefined}
-          aria-expanded={sessionLayout ? expanded : undefined}
+          aria-expanded={sessionLayout ? showSessions : undefined}
           aria-controls={sessionLayout ? contentId : undefined}
           className={`flex min-w-0 flex-1 cursor-default items-center gap-2 text-left transition-[padding] duration-150 motion-reduce:transition-none ${sessionLayout ? "group-hover:pr-12 group-has-[:focus-visible]:pr-12" : "group-hover:pr-6 group-has-[:focus-visible]:pr-6"}`}
         >
           {sessionLayout ? (
-            expanded ? (
+            showSessions ? (
               <ChevronDown className="size-3 shrink-0 text-content/50" />
             ) : (
               <ChevronRight className="size-3 shrink-0 text-content/50" />
@@ -1198,11 +1213,11 @@ function ProjectCard({
       {sessionLayout ? (
         <div
           id={contentId}
-          data-project-sessions={expanded ? item.path : undefined}
-          hidden={!expanded}
+          data-project-sessions={showSessions ? item.path : undefined}
+          hidden={!showSessions}
           className="pb-2 pl-2"
         >
-          {expanded
+          {showSessions
             ? sessionLayout.render(item.path, sessionLayout.visible)
             : null}
         </div>

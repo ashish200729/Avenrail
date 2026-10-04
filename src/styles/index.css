@@ -176,11 +176,13 @@ html:not(.is-mac) ::-webkit-scrollbar-corner {
 @supports selector(::-webkit-scrollbar) {
   .sidebar-scroll {
     scrollbar-width: auto;
+    /* Non-auto standard colors override the WebKit scrollbar rules below. */
+    scrollbar-color: auto;
   }
 }
 html .sidebar-scroll::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
 }
 html .sidebar-scroll::-webkit-scrollbar-track,
 html .sidebar-scroll::-webkit-scrollbar-corner {

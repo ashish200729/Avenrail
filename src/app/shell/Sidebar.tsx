@@ -27,8 +27,10 @@ import {
   Zap,
 } from "../../shared/ui/icons";
 import {
+  createContext,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -56,7 +58,10 @@ import { IS_MAC, MOD } from "../../platform/tauri/platform";
 import { copyText } from "../../platform/tauri/clipboard";
 import { resolveModel } from "../../features/sessions/model/models";
 import type { OpenFileFn } from "../../features/search/model/search";
-import { sessionDisplayTitle } from "../../features/sessions/model/session";
+import {
+  HARNESSES,
+  sessionDisplayTitle,
+} from "../../features/sessions/model/session";
 import { nextUnseenFinishedSessions } from "../../features/sessions/model/sessionDone";
 import { orchestrationTaskLabel } from "../../features/orchestration/model/orchestrationSummary";
 import {
@@ -216,6 +221,16 @@ function projectPathBusy(
   }
   return false;
 }
+
+type SessionListControls = {
+  query: string;
+  setQuery: (query: string) => void;
+  filters: SessionSidebarFilters;
+  setFilters: (filters: SessionSidebarFilters) => void;
+};
+const SessionListControlsContext = createContext<SessionListControls | null>(
+  null,
+);
 
 type Props = {
   /** Session lists can be embedded below a project heading in the single rail. */
@@ -416,6 +431,7 @@ function ProjectSessionList({
   onOpenWhatsNew,
   onDismissUpdate,
 }: Props) {
+  const sharedControls = useContext(SessionListControlsContext);
   const remoteProject = isRemoteProjectPath(cwd);
   const tab: SidebarTabId = embeddedSessions ? "sessions" : requestedTab;
   const remote = useRemoteProjectSessions(
@@ -629,13 +645,15 @@ function ProjectSessionList({
   const [sessionDrop, setSessionDrop] = useState<SessionListDropTarget | null>(
     null,
   );
-  const [sessionFilters, setSessionFilters] = useState(
-    loadSessionSidebarFilters,
-  );
+  const [localFilters, setLocalFilters] = useState(loadSessionSidebarFilters);
+  const sessionFilters = sharedControls?.filters ?? localFilters;
+  const setSessionFilters = sharedControls?.setFilters ?? setLocalFilters;
   const [filterMenu, setFilterMenu] = useState<{ x: number; y: number } | null>(
     null,
   );
-  const [searchQuery, setSearchQuery] = useState("");
+  const [localQuery, setLocalQuery] = useState("");
+  const searchQuery = sharedControls?.query ?? localQuery;
+  const setSearchQuery = sharedControls?.setQuery ?? setLocalQuery;
   const [sessionListLimit, setSessionListLimit] = useState(LIST_PAGE_SIZE);
   const loadMoreRef = useRef<HTMLLIElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -1795,7 +1813,7 @@ function ProjectSessionList({
             )}
           </div>
         ) : null}
-        {tab === "sessions" && cwd && cwd !== "~" ? (
+        {tab === "sessions" && cwd && cwd !== "~" && !sharedControls ? (
           <div
             className={
               embeddedSessions
@@ -2398,90 +2416,168 @@ function ProjectSessions({
 }
 
 function SidebarComponent(props: Props) {
+  const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState(loadSessionSidebarFilters);
+  const [filterMenu, setFilterMenu] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+  const filterButton = useRef<HTMLButtonElement>(null);
+  const controls = useMemo(
+    () => ({ query, setQuery, filters, setFilters }),
+    [query, filters],
+  );
+  const visible = (props.projectRailOpen ?? props.open) || !!props.settingsOpen;
+  useEffect(() => {
+    if (!visible) setFilterMenu(null);
+  }, [visible]);
   if (!props.onSelectProject || !props.onOpenProject)
     return <ProjectSessionList {...props} />;
-  const visible = (props.projectRailOpen ?? props.open) || !!props.settingsOpen;
   return (
-    <div className="flex h-full shrink-0">
-      {!visible && (props.compactProjectRail ?? true) ? (
-        <CompactProjectRail
+    <SessionListControlsContext.Provider value={controls}>
+      <div className="flex h-full shrink-0">
+        {!visible && (props.compactProjectRail ?? true) ? (
+          <CompactProjectRail
+            cwd={props.cwd}
+            recents={props.recents ?? []}
+            busy={projectPathBusy(props.busyProjectPaths, props.cwd)}
+            tabs={[]}
+            activeTab="sessions"
+            tabShown={false}
+            changesLabel="Changes"
+            hasChanges={false}
+            inboxUnseen={props.inboxUnseen ?? false}
+            onSelectProject={props.onSelectProject}
+            onOpenProject={props.onOpenProject}
+            onRemoveProject={props.onRemoveProject}
+            onTabChange={() => props.onToggleProjectRail?.()}
+            onSearch={props.onSearch}
+            searchActive={props.searchActive ?? false}
+            onOpenInbox={props.onOpenInbox}
+            inboxActive={props.inboxActive ?? false}
+            onOpenNotificationSettings={props.onOpenNotificationSettings}
+            onOpenNotes={
+              props.notesEnabled === false ? undefined : props.onOpenNotes
+            }
+            notesActive={props.notesActive ?? false}
+            onOpenAutomations={props.onOpenAutomations}
+            automationsActive={props.automationsActive ?? false}
+            onOpenSettings={props.onOpenSettings}
+            onTogglePanel={props.onToggleProjectRail}
+            onLeaveActive={props.onGoBack}
+            titleBarAbove={props.titleBarAbove ?? false}
+          />
+        ) : null}
+        <ProjectRail
+          searchingSessions={
+            Boolean(query.trim()) || hasActiveSessionFilters(filters)
+          }
+          sessionControls={
+            <div
+              className="flex shrink-0 items-center gap-1 px-2 pb-2"
+              data-sidebar-session-controls
+            >
+              <div className="relative flex h-7 min-w-0 flex-1 items-center rounded-md bg-content/3 focus-within:ring-1 focus-within:ring-accent/50">
+                <Search className="pointer-events-none absolute left-2 size-3 text-content/60" />
+                <input
+                  type="search"
+                  aria-label="Search conversations"
+                  placeholder="Search sessions"
+                  value={query}
+                  spellCheck={false}
+                  autoComplete="off"
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setQuery("");
+                  }}
+                  className="h-full w-full min-w-0 rounded-md bg-transparent pl-7 pr-2 text-[12px] text-content outline-none placeholder:text-content/60"
+                />
+              </div>
+              <button
+                ref={filterButton}
+                type="button"
+                aria-label="Filter sessions"
+                title="Filter sessions"
+                aria-haspopup="menu"
+                aria-expanded={Boolean(filterMenu)}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setFilterMenu(
+                    filterMenu
+                      ? null
+                      : { x: rect.right - 228, y: rect.bottom + 2 },
+                  );
+                }}
+                className={`grid size-7 shrink-0 place-items-center rounded-md hover:bg-content/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${hasActiveSessionFilters(filters) ? "bg-accent/10 text-accent" : "text-content/65"}`}
+              >
+                <ListFilter className="size-3.5" />
+              </button>
+            </div>
+          }
+          visible={visible}
           cwd={props.cwd}
           recents={props.recents ?? []}
-          busy={projectPathBusy(props.busyProjectPaths, props.cwd)}
-          tabs={[]}
-          activeTab="sessions"
-          tabShown={false}
-          changesLabel="Changes"
-          hasChanges={false}
-          inboxUnseen={props.inboxUnseen ?? false}
+          inboxUnseen={props.inboxUnseen}
+          busyPaths={props.busyProjectPaths}
+          liveAgents={props.liveAgents}
+          activeSessionId={props.activeSessionId}
+          onSelectAgent={props.onSelectAgent}
+          canGoBack={props.canGoBack}
+          canGoForward={props.canGoForward}
+          onGoBack={props.onGoBack}
+          onGoForward={props.onGoForward}
+          onSearch={props.onSearch}
+          searchActive={props.searchActive}
+          onOpenInbox={props.onOpenInbox}
+          inboxActive={props.inboxActive}
+          notesEnabled={props.notesEnabled}
+          onOpenNotes={props.onOpenNotes}
+          notesActive={props.notesActive}
+          onOpenAutomations={props.onOpenAutomations}
+          automationsActive={props.automationsActive}
+          onTogglePanel={props.onToggleProjectRail}
           onSelectProject={props.onSelectProject}
           onOpenProject={props.onOpenProject}
           onRemoveProject={props.onRemoveProject}
-          onTabChange={() => props.onToggleProjectRail?.()}
-          onSearch={props.onSearch}
-          searchActive={props.searchActive ?? false}
-          onOpenInbox={props.onOpenInbox}
-          inboxActive={props.inboxActive ?? false}
-          onOpenNotificationSettings={props.onOpenNotificationSettings}
-          onOpenNotes={
-            props.notesEnabled === false ? undefined : props.onOpenNotes
-          }
-          notesActive={props.notesActive ?? false}
-          onOpenAutomations={props.onOpenAutomations}
-          automationsActive={props.automationsActive ?? false}
+          settingsOpen={props.settingsOpen}
+          settingsSection={props.settingsSection}
           onOpenSettings={props.onOpenSettings}
-          onTogglePanel={props.onToggleProjectRail}
-          onLeaveActive={props.onGoBack}
-          titleBarAbove={props.titleBarAbove ?? false}
+          onOpenNotificationSettings={props.onOpenNotificationSettings}
+          onSelectSettingsSection={props.onSelectSettingsSection}
+          onCloseSettings={props.onCloseSettings}
+          updateNotice={props.updateNotice}
+          onOpenWhatsNew={props.onOpenWhatsNew}
+          onDismissUpdate={props.onDismissUpdate}
+          onNew={props.onNew}
+          onNewProjectSession={props.onNewProjectSession}
+          renderProjectSessions={(path, visible) => (
+            <ProjectSessions
+              key={pathKey(path)}
+              path={path}
+              props={props}
+              visible={visible}
+            />
+          )}
+        />
+      </div>
+      {filterMenu && visible ? (
+        <SessionFiltersMenu
+          {...filterMenu}
+          harnesses={HARNESSES}
+          filters={filters}
+          onChange={(next) => {
+            setFilters(next);
+            saveSessionSidebarFilters(next);
+          }}
+          onClose={() => {
+            setFilterMenu(null);
+            filterButton.current?.focus();
+          }}
         />
       ) : null}
-      <ProjectRail
-        visible={visible}
-        cwd={props.cwd}
-        recents={props.recents ?? []}
-        inboxUnseen={props.inboxUnseen}
-        busyPaths={props.busyProjectPaths}
-        liveAgents={props.liveAgents}
-        activeSessionId={props.activeSessionId}
-        onSelectAgent={props.onSelectAgent}
-        canGoBack={props.canGoBack}
-        canGoForward={props.canGoForward}
-        onGoBack={props.onGoBack}
-        onGoForward={props.onGoForward}
-        onSearch={props.onSearch}
-        searchActive={props.searchActive}
-        onOpenInbox={props.onOpenInbox}
-        inboxActive={props.inboxActive}
-        notesEnabled={props.notesEnabled}
-        onOpenNotes={props.onOpenNotes}
-        notesActive={props.notesActive}
-        onOpenAutomations={props.onOpenAutomations}
-        automationsActive={props.automationsActive}
-        onTogglePanel={props.onToggleProjectRail}
-        onSelectProject={props.onSelectProject}
-        onOpenProject={props.onOpenProject}
-        onRemoveProject={props.onRemoveProject}
-        settingsOpen={props.settingsOpen}
-        settingsSection={props.settingsSection}
-        onOpenSettings={props.onOpenSettings}
-        onOpenNotificationSettings={props.onOpenNotificationSettings}
-        onSelectSettingsSection={props.onSelectSettingsSection}
-        onCloseSettings={props.onCloseSettings}
-        updateNotice={props.updateNotice}
-        onOpenWhatsNew={props.onOpenWhatsNew}
-        onDismissUpdate={props.onDismissUpdate}
-        onNew={props.onNew}
-        onNewProjectSession={props.onNewProjectSession}
-        renderProjectSessions={(path, visible) => (
-          <ProjectSessions
-            key={pathKey(path)}
-            path={path}
-            props={props}
-            visible={visible}
-          />
-        )}
-      />
-    </div>
+    </SessionListControlsContext.Provider>
   );
 }
 
@@ -3514,13 +3610,7 @@ const SessionCard = memo(function SessionCard({
   // Expanding an orchestration card must not move its existing header. Keep
   // the collapsed top inset and give only the new detail area extra room at
   // the bottom.
-  const cardPaddingY = orchestrationExpanded
-    ? compact
-      ? "pb-2.5 pt-1.5"
-      : "pb-2.5 pt-2"
-    : compact
-      ? "py-1.5"
-      : "py-2";
+  const cardPaddingY = orchestrationExpanded ? "pb-2.5 pt-1.5" : "py-1.5";
 
   return (
     <div className="group relative">
@@ -3583,10 +3673,10 @@ const SessionCard = memo(function SessionCard({
           }}
           className="min-w-0 rounded-sm outline-none"
         >
-          <span className="relative flex min-w-0 items-start gap-2">
+          <span className="relative flex min-w-0 items-center gap-2">
             <HarnessIcon
               harness={session.harness}
-              className="mt-0.5 size-4 shrink-0"
+              className="size-3.5 shrink-0"
             />
             {session.pinned ? (
               <Pin
@@ -3594,30 +3684,14 @@ const SessionCard = memo(function SessionCard({
                 strokeWidth={1.75}
               />
             ) : null}
-            <span className="min-w-0 flex-1 line-clamp-2 text-[13px] font-medium leading-5 text-content">
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-5 text-content">
               {title}
             </span>
-            {compact && !orchestrationExpanded ? (
-              <span className="flex shrink-0 items-center gap-1.5">
-                {linkedUpdateDot}
-                {status}
-              </span>
-            ) : null}
-          </span>
-          {compact && !orchestrationExpanded ? null : (
-            <span className="relative mt-1 flex min-w-0 items-center gap-2 pl-6">
-              <span
-                className="min-w-0 flex-1 truncate text-[11px] leading-4 text-content/65"
-                title={model ?? undefined}
-              >
-                {model}
-              </span>
-              <span className="flex shrink-0 items-center gap-1.5">
-                {linkedUpdateDot}
-                {status}
-              </span>
+            <span className="flex shrink-0 items-center gap-1.5">
+              {linkedUpdateDot}
+              {status}
             </span>
-          )}
+          </span>
         </div>
         {orchestrationExpanded ? (
           <OrchestrationSidebarAgents
@@ -3625,7 +3699,15 @@ const SessionCard = memo(function SessionCard({
             summary={orchestration!}
           />
         ) : null}
-        <span className="relative mt-1 flex min-w-0 items-center gap-2 pl-6">
+        <span className="relative mt-0.5 flex min-w-0 items-center gap-2 pl-5.5">
+          {model ? (
+            <span
+              className="min-w-0 max-w-24 shrink truncate text-[11px] leading-4 text-content/65"
+              title={model}
+            >
+              {model}
+            </span>
+          ) : null}
           {gitLabel ? (
             <span
               className="flex min-w-0 flex-1 items-center gap-1 text-[11px] text-content/60"

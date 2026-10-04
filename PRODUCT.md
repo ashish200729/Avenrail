@@ -30,7 +30,7 @@ For this navigation work, use the development server for testing. Do not build a
 
 When the project sidebar is collapsed or hidden, keep a labeled New session button at the left of the main title bar, before the conversation tabs. It must remain available independently of the right workspace panel and use the existing session action and shortcut.
 
-Both sidebars remain resizable, but share a minimum usable chat width of `600px` when space permits. Retain overlay workspace behavior for smaller windows. Session cards prioritize conversation titles over model metadata, keep lifecycle states readable, and use a compact sidebar scrollbar while preserving selection, search, filtering, folders, reminders, menus, linked work items, orchestration, and drag placement.
+Both sidebars remain resizable, but share a minimum usable chat width of `600px` when space permits. Retain overlay workspace behavior for smaller windows. Session cards use two compact rows, with titles and status above model/checkout details. Use one shared session search and filter bar across projects, with temporary expansion during search/filtering and restored expansion afterward. Keep the sidebar scrollbar at `4px` where custom scrollbars are supported. Preserve selection, folders, reminders, menus, linked work items, orchestration, and drag placement.
 
 ## Brand commitments
 

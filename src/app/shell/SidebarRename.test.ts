@@ -939,7 +939,7 @@ describe("sidebar orchestration card", () => {
     props.busySessionIds = new Set();
     act(() => render());
 
-    expect(card().classList.contains("py-2")).toBe(true);
+    expect(card().classList.contains("py-1.5")).toBe(true);
     expect(card().classList.contains("py-2.5")).toBe(false);
     expect(card().classList.contains("bg-content/5")).toBe(false);
     expect(card().querySelector("[data-orchestration-icon]")).not.toBeNull();
@@ -947,7 +947,7 @@ describe("sidebar orchestration card", () => {
 
     props.activeSessionId = "session-1";
     act(() => render());
-    expect(card().classList.contains("pt-2")).toBe(true);
+    expect(card().classList.contains("pt-1.5")).toBe(true);
     expect(card().classList.contains("pb-2.5")).toBe(true);
     expect(card().classList.contains("py-2.5")).toBe(false);
     expect(
@@ -957,7 +957,7 @@ describe("sidebar orchestration card", () => {
     props.activeSessionId = "another-session";
     props.busySessionIds = new Set(["session-1"]);
     act(() => render());
-    expect(card().classList.contains("pt-2")).toBe(true);
+    expect(card().classList.contains("pt-1.5")).toBe(true);
     expect(card().classList.contains("pb-2.5")).toBe(true);
     expect(
       card().querySelector('[data-orchestration-agent="worker"]'),

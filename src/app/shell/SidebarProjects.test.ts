@@ -105,6 +105,73 @@ it("shows one project rail with nested sessions and no duplicate Workspace, Expl
   expect(host.textContent).not.toContain("Explorer");
   expect(host.textContent).not.toContain("+5");
   expect(host.querySelector('[aria-label="Resize sidebar"]')).toBeNull();
+  expect(
+    host.querySelectorAll('input[aria-label="Search conversations"]'),
+  ).toHaveLength(1);
+  expect(
+    project(alpha).querySelector('input[aria-label="Search conversations"]'),
+  ).toBeNull();
+});
+
+it("searches collapsed projects from one field and restores their expansion state", async () => {
+  await render();
+  const input = host.querySelector<HTMLInputElement>(
+    'input[aria-label="Search conversations"]',
+  )!;
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )!.set!;
+  const search = async (value: string) =>
+    act(async () => {
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  await search("b conversation");
+  expect(
+    host.querySelectorAll('input[aria-label="Search conversations"]'),
+  ).toHaveLength(1);
+  expect(project(beta).querySelector('[data-session-card="b"]')).not.toBeNull();
+  expect(project(alpha).querySelector('[data-session-card="a"]')).toBeNull();
+  expect(toggle(beta).getAttribute("aria-expanded")).toBe("true");
+  expect(props.onSelectProject).not.toHaveBeenCalled();
+  expect(props.onSelectSession).not.toHaveBeenCalled();
+  await act(async () =>
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    ),
+  );
+  expect(input.value).toBe("");
+  expect(toggle(beta).getAttribute("aria-expanded")).toBe("false");
+  expect(
+    project(alpha).querySelector('[data-session-card="a"]'),
+  ).not.toBeNull();
+});
+
+it("applies shared session filters to every expanded project", async () => {
+  props = { ...props, busySessionIds: new Set(["b"]) };
+  await render();
+  await click(
+    host.querySelector<HTMLElement>('[aria-label="Filter sessions"]')!,
+  );
+  const working = Array.from(
+    document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]'),
+  ).find((item) => item.textContent === "Working")!;
+  await click(working);
+  expect(project(alpha).querySelector('[data-session-card="a"]')).toBeNull();
+  expect(project(beta).querySelector('[data-session-card="b"]')).not.toBeNull();
+  expect(toggle(beta).getAttribute("aria-expanded")).toBe("true");
+  expect(host.querySelectorAll('[aria-label="Filter sessions"]').length).toBe(
+    1,
+  );
+  const clear = Array.from(
+    document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ).find((item) => item.textContent === "Clear filters")!;
+  await click(clear);
+  expect(
+    project(alpha).querySelector('[data-session-card="a"]'),
+  ).not.toBeNull();
+  expect(toggle(beta).getAttribute("aria-expanded")).toBe("false");
 });
 
 it("expands projects independently without navigating over the active conversation", async () => {
