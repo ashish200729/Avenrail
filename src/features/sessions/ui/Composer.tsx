@@ -2064,7 +2064,7 @@ export function Composer({
               onManage={() => {
                 mcpInsertAt.current = null;
                 setMcpPickerOpen(false);
-                window.dispatchEvent(new Event("monocode:open-mcp-settings"));
+                window.dispatchEvent(new Event("avenrail:open-mcp-settings"));
               }}
               onDismiss={(reason) => {
                 mcpInsertAt.current = null;

@@ -15,8 +15,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: mocks.openUrl }));
 vi.mock("../../features/inbox/model/githubTasks", () => ({
-  githubMonocodeStarStatus: mocks.starStatus,
-  starMonocodeOnGithub: mocks.star,
+  githubAvenrailStarStatus: mocks.starStatus,
+  starAvenrailOnGithub: mocks.star,
 }));
 
 let container: HTMLDivElement;
@@ -142,7 +142,7 @@ it("stays dismissed across remounts without checking GitHub again", async () => 
       ?.click();
   });
 
-  expect(localStorage.getItem("monocode.githubStarPrompt.dismissed.v1")).toBe(
+  expect(localStorage.getItem("avenrail.githubStarPrompt.dismissed.v1")).toBe(
     "1",
   );
   expect(container.querySelector("[data-github-star-prompt]")).toBeNull();

@@ -1390,7 +1390,7 @@ const KILL_ESCALATE: Duration = Duration::from_secs(2);
 const KILL_ALL_GRACE: Duration = Duration::from_millis(300);
 #[cfg(not(windows))]
 const KILL_ALL_KILL_WAIT: Duration = Duration::from_millis(150);
-const HARNESS_PARENT_ENV: &str = "MONOCODE_HARNESS_PARENT";
+const HARNESS_PARENT_ENV: &str = "AVENRAIL_HARNESS_PARENT";
 
 /// An interactive shell has to source the user's whole rc file; nvm alone can
 /// take a second.
@@ -2666,7 +2666,7 @@ mod windows_launcher_tests {
 
     #[test]
     fn npm_shell_shim_does_not_hide_windows_launcher() {
-        let dir = std::env::temp_dir().join(format!("monocode-launcher-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-launcher-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let bare = dir.join("agent");
         let cmd = dir.join("agent.cmd");
@@ -3365,7 +3365,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let root =
-            std::env::temp_dir().join(format!("monocode-mcp-binaries-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("avenrail-mcp-binaries-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let host = HarnessHost::new();
         let mut paths = HashMap::new();
@@ -3465,7 +3465,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = std::env::temp_dir().join(format!(
-            "monocode-configured-binaries-{}",
+            "avenrail-configured-binaries-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -3834,7 +3834,7 @@ mod tests {
 
     #[test]
     fn grok_accepts_official_install_path_and_markers() {
-        let dir = std::env::temp_dir().join(format!("monocode-grok-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-grok-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let home = dir.join(".grok/bin");
         std::fs::create_dir_all(&home).unwrap();
@@ -3859,7 +3859,7 @@ mod tests {
     #[cfg(unix)]
     fn antigravity_resolver_prefers_executable_wrapper_and_tracks_orphans() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("monocode-agy-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("avenrail-agy-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("bin")).unwrap();
         let wrapper = dir.join("bin/agy_acp_server.par");
         let server = dir.join("agy_acp_server.par");
@@ -3972,7 +3972,7 @@ mod windows_binary_tests {
     #[test]
     fn configured_binary_path_accepts_windows_shim_extension() {
         let dir = std::env::temp_dir().join(format!(
-            "monocode-configured-windows-binary-{}",
+            "avenrail-configured-windows-binary-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -4024,7 +4024,7 @@ mod reap_logic_tests {
     #[test]
     fn parse_ps_row_reads_harness_parent_from_env_tail() {
         let parsed = parse_ps_row(
-            " 27129 21504 /Users/n/cursor-agent acp PATH=/usr/bin MONOCODE_HARNESS_PARENT=21504 HOME=/tmp",
+            " 27129 21504 /Users/n/cursor-agent acp PATH=/usr/bin AVENRAIL_HARNESS_PARENT=21504 HOME=/tmp",
         )
         .unwrap();
         assert_eq!(parsed.pid, 27129);
@@ -4110,7 +4110,7 @@ mod reap_logic_tests {
     #[test]
     fn parse_ps_pid_command_does_not_treat_the_binary_as_ppid() {
         let (pid, command) = parse_ps_pid_command(
-            " 27129 /Users/n/cursor-agent acp PATH=/usr/bin MONOCODE_HARNESS_PARENT=21504 HOME=/tmp",
+            " 27129 /Users/n/cursor-agent acp PATH=/usr/bin AVENRAIL_HARNESS_PARENT=21504 HOME=/tmp",
         )
         .unwrap();
         assert_eq!(pid, 27129);

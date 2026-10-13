@@ -16,6 +16,7 @@ import {
   GitBranch,
   GitPullRequest,
   Inbox,
+  Triage,
   ListFilter,
   PanelLeft,
   Pin,
@@ -23,7 +24,6 @@ import {
   Search,
   Share,
   Settings,
-  StickyNote,
   Zap,
 } from "../../shared/ui/icons";
 import {
@@ -153,6 +153,7 @@ import {
 } from "../../features/files/ui/ExplorerMenu";
 import { FileTree } from "../../features/files/ui/FileTree";
 import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
+import { SessionMark } from "../../features/sessions/ui/SessionMark";
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectRail } from "./ProjectRail";
 import { InboxNotificationMenu } from "../../features/inbox/ui/InboxNotificationMenu";
@@ -199,14 +200,14 @@ type SidebarTab = SidebarTabId;
 
 const TAB_LABELS: Record<SidebarTab, string> = {
   sessions: "Sessions",
-  inbox: "Inbox",
+  inbox: "PRs & issues",
   files: "Explorer",
   changes: "Changes",
 };
 
 const COMPACT_TAB_ICONS: Record<SidebarTab, typeof PanelLeft> = {
   sessions: Chatting,
-  inbox: Inbox,
+  inbox: Triage,
   files: FileScript,
   changes: GitBranch,
 };
@@ -241,6 +242,8 @@ type Props = {
   failedProjectPaths?: ReadonlySet<string>;
   onLoadProjectSessions?: (path: string) => void;
   onNewProjectSession?: (path: string) => string | void;
+  /** Starts a fresh session even when an empty one is already open. */
+  onCreateSession?: () => string | void;
   cwd: string;
   /** Working copy for Changes / explorer git. Falls back to `cwd`. */
   gitCwd?: string;
@@ -316,14 +319,11 @@ type Props = {
   onSearch?: () => void;
   onOpenInbox?: () => void;
   onOpenInboxItem?: (item: LinkedWorkItem, sessionId: string) => void;
-  onOpenNotes?: () => void;
   onOpenAutomations?: () => void;
   onGoToFile?: () => void;
   searchActive?: boolean;
   inboxActive?: boolean;
-  notesActive?: boolean;
   automationsActive?: boolean;
-  notesEnabled?: boolean;
   onToggleProjectRail?: () => void;
   projectRailOpen?: boolean;
   compactProjectRail?: boolean;
@@ -403,17 +403,15 @@ function ProjectSessionList({
   onOpenProject,
   onRemoveProject,
   onNew,
+  onCreateSession,
   onSearch,
   onOpenInbox,
   onOpenInboxItem,
-  onOpenNotes,
   onOpenAutomations,
   onGoToFile,
   searchActive = false,
   inboxActive = false,
-  notesActive = false,
   automationsActive = false,
-  notesEnabled = true,
   onToggleProjectRail,
   projectRailOpen = true,
   compactProjectRail = true,
@@ -820,7 +818,6 @@ function ProjectSessionList({
   const sidebarAvailable =
     !searchActive &&
     !inboxActive &&
-    !notesActive &&
     !automationsActive &&
     !settingsOpen &&
     inProject;
@@ -1094,7 +1091,7 @@ function ProjectSessionList({
   };
 
   const onNewInFolder = (folderId: string) => {
-    const sessionId = onNew?.();
+    const sessionId = (onCreateSession ?? onNew)?.();
     if (!sessionId) return;
     pendingFolderSessionIds.current.add(sessionId);
     setSearchQuery("");
@@ -1200,7 +1197,7 @@ function ProjectSessionList({
               },
               {
                 kind: "item" as const,
-                id: "copy-monocode-session-id",
+                id: "copy-avenrail-session-id",
                 label: "Avenrail session ID",
               },
             ],
@@ -1346,7 +1343,7 @@ function ProjectSessionList({
       setRenamingSessionId(sessionId);
       return;
     }
-    if (id === "copy-harness-session-id" || id === "copy-monocode-session-id") {
+    if (id === "copy-harness-session-id" || id === "copy-avenrail-session-id") {
       const value =
         id === "copy-harness-session-id" ? providerSessionId : sessionId;
       if (value) {
@@ -1758,11 +1755,9 @@ function ProjectSessionList({
               onSearch={onSearch}
               onOpenInbox={onOpenInbox}
               onOpenNotificationSettings={onOpenNotificationSettings}
-              onOpenNotes={notesEnabled ? onOpenNotes : undefined}
               onOpenAutomations={onOpenAutomations}
               searchActive={searchActive}
               inboxActive={inboxActive}
-              notesActive={notesActive}
               automationsActive={automationsActive}
               inboxUnseen={inboxUnseen}
             />
@@ -2278,8 +2273,6 @@ function ProjectSessionList({
           onOpenInbox={onOpenInbox}
           inboxActive={inboxActive}
           onOpenNotificationSettings={onOpenNotificationSettings}
-          onOpenNotes={notesEnabled ? onOpenNotes : undefined}
-          notesActive={notesActive}
           onOpenAutomations={onOpenAutomations}
           automationsActive={automationsActive}
           onOpenSettings={onOpenSettings}
@@ -2306,9 +2299,6 @@ function ProjectSessionList({
           searchActive={searchActive}
           onOpenInbox={onOpenInbox}
           inboxActive={inboxActive}
-          notesEnabled={notesEnabled}
-          onOpenNotes={onOpenNotes}
-          notesActive={notesActive}
           onOpenAutomations={onOpenAutomations}
           automationsActive={automationsActive}
           onTogglePanel={onToggleProjectRail}
@@ -2455,10 +2445,6 @@ function SidebarComponent(props: Props) {
             onOpenInbox={props.onOpenInbox}
             inboxActive={props.inboxActive ?? false}
             onOpenNotificationSettings={props.onOpenNotificationSettings}
-            onOpenNotes={
-              props.notesEnabled === false ? undefined : props.onOpenNotes
-            }
-            notesActive={props.notesActive ?? false}
             onOpenAutomations={props.onOpenAutomations}
             automationsActive={props.automationsActive ?? false}
             onOpenSettings={props.onOpenSettings}
@@ -2532,9 +2518,6 @@ function SidebarComponent(props: Props) {
           searchActive={props.searchActive}
           onOpenInbox={props.onOpenInbox}
           inboxActive={props.inboxActive}
-          notesEnabled={props.notesEnabled}
-          onOpenNotes={props.onOpenNotes}
-          notesActive={props.notesActive}
           onOpenAutomations={props.onOpenAutomations}
           automationsActive={props.automationsActive}
           onTogglePanel={props.onToggleProjectRail}
@@ -2622,11 +2605,9 @@ function SidebarProjectPicker({
   onSearch,
   onOpenInbox,
   onOpenNotificationSettings,
-  onOpenNotes,
   onOpenAutomations,
   searchActive = false,
   inboxActive = false,
-  notesActive = false,
   automationsActive = false,
   inboxUnseen = false,
 }: {
@@ -2640,11 +2621,9 @@ function SidebarProjectPicker({
   onSearch?: () => void;
   onOpenInbox?: () => void;
   onOpenNotificationSettings?: (projectPath?: string) => void;
-  onOpenNotes?: () => void;
   onOpenAutomations?: () => void;
   searchActive?: boolean;
   inboxActive?: boolean;
-  notesActive?: boolean;
   automationsActive?: boolean;
   inboxUnseen?: boolean;
 }) {
@@ -2684,7 +2663,7 @@ function SidebarProjectPicker({
         ) : null}
         {onOpenInbox ? (
           <IconButton
-            label={inboxUnseen ? "Inbox, new items" : "Inbox"}
+            label={inboxUnseen ? "PRs & issues, new items" : "PRs & issues"}
             active={inboxActive}
             onClick={onOpenInbox}
             onOpenContextMenu={(x, y) => {
@@ -2696,7 +2675,7 @@ function SidebarProjectPicker({
             }}
           >
             <span className="relative">
-              <Inbox className="size-3.5" strokeWidth={1.75} />
+              <Triage className="size-3.5" strokeWidth={1.75} />
               {inboxUnseen ? (
                 <span
                   aria-hidden
@@ -2704,11 +2683,6 @@ function SidebarProjectPicker({
                 />
               ) : null}
             </span>
-          </IconButton>
-        ) : null}
-        {onOpenNotes ? (
-          <IconButton label="Notes" active={notesActive} onClick={onOpenNotes}>
-            <StickyNote className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}
         {onOpenAutomations ? (
@@ -2755,8 +2729,6 @@ function CompactProjectRail({
   onOpenInbox,
   inboxActive,
   onOpenNotificationSettings,
-  onOpenNotes,
-  notesActive,
   onOpenAutomations,
   automationsActive,
   onOpenSettings,
@@ -2782,8 +2754,6 @@ function CompactProjectRail({
   onOpenInbox?: () => void;
   inboxActive: boolean;
   onOpenNotificationSettings?: (projectPath?: string) => void;
-  onOpenNotes?: () => void;
-  notesActive: boolean;
   onOpenAutomations?: () => void;
   automationsActive: boolean;
   onOpenSettings?: () => void;
@@ -2797,8 +2767,7 @@ function CompactProjectRail({
   const inboxTrigger = useRef<HTMLElement | null>(null);
   const action = (active: boolean, open?: () => void) =>
     active && onLeaveActive ? onLeaveActive : open;
-  const workspaceActive =
-    !searchActive && !inboxActive && !notesActive && !automationsActive;
+  const workspaceActive = !searchActive && !inboxActive && !automationsActive;
   const openWorkspaceTab = (nextTab: SidebarTab) => {
     if (!workspaceActive) onLeaveActive?.();
     onTabChange(nextTab);
@@ -2872,7 +2841,7 @@ function CompactProjectRail({
           onClick={action(searchActive, onSearch)}
         />
         <CompactRailAction
-          label={inboxUnseen ? "Inbox, new items" : "Inbox"}
+          label={inboxUnseen ? "PRs & issues, new items" : "PRs & issues"}
           icon={Inbox}
           active={inboxActive}
           dot={inboxUnseen}
@@ -2885,14 +2854,6 @@ function CompactProjectRail({
             setInboxMenu({ x, y });
           }}
         />
-        {onOpenNotes ? (
-          <CompactRailAction
-            label="Notes"
-            icon={StickyNote}
-            active={notesActive}
-            onClick={action(notesActive, onOpenNotes)}
-          />
-        ) : null}
         <CompactRailAction
           label="Automations"
           icon={Zap}
@@ -3372,7 +3333,7 @@ const SessionCard = memo(function SessionCard({
       ? "text-accent"
       : done
         ? "text-emerald-700 dark:text-emerald-400"
-        : "text-content/65";
+        : "text-content/50";
   const status = (
     <span
       data-session-status={
@@ -3386,7 +3347,7 @@ const SessionCard = memo(function SessionCard({
                 ? "draft"
                 : "idle"
       }
-      className={`flex shrink-0 items-center gap-1 text-[11px] tabular-nums ${statusClass}`}
+      className={`flex shrink-0 items-center gap-1 text-[11px] leading-[18px] tabular-nums ${statusClass}`}
     >
       {needsApproval ? (
         <>
@@ -3396,7 +3357,7 @@ const SessionCard = memo(function SessionCard({
       ) : busy ? (
         <>
           <TerminalSpinner className="inline-block w-3 select-none text-center text-[11px] leading-none text-accent" />
-          <span>Working...</span>
+          <span>Working</span>
         </>
       ) : done ? (
         <>
@@ -3632,7 +3593,7 @@ const SessionCard = memo(function SessionCard({
             ? (event) => onContextMenu(session.id, event)
             : undefined
         }
-        className={`relative border flex w-full min-w-0 cursor-default select-none touch-none flex-col rounded-lg px-2.5 text-left focus-within:ring-2 focus-within:ring-accent/60 ${cardPaddingY} ${
+        className={`relative border flex w-full min-w-0 cursor-default select-none touch-none flex-col rounded-lg px-2.5 text-left transition-colors duration-150 focus-within:ring-2 focus-within:ring-accent/60 ${cardPaddingY} ${
           dragging ? "opacity-40" : ""
         } ${
           dropTarget
@@ -3640,14 +3601,14 @@ const SessionCard = memo(function SessionCard({
             : isSelected
               ? `bg-accent/12 text-content ${draft ? "border-accent/30 border-dashed" : "border-accent/20"}`
               : needsApproval
-                ? "bg-amber-400/8 text-content border-amber-500/30 border-dashed"
+                ? "bg-amber-400/8 text-content border-amber-500/25"
                 : isActive
-                  ? `bg-selection text-content ${draft ? "border-content/30 border-dashed" : "border-content/8"}`
+                  ? `bg-selection text-content ${draft ? "border-content/30 border-dashed" : "border-transparent"}`
                   : draft
-                    ? "border-content/25 border-dashed text-content/80 hover:bg-content/5 hover:text-content"
-                    : `text-content/80 hover:text-content border-transparent hover:border-content/8 ${
+                    ? "border-content/20 border-dashed text-content/80 hover:bg-content/5 hover:text-content"
+                    : `text-content/80 hover:text-content border-transparent ${
                         orchestrationExpanded
-                          ? "bg-content/5 hover:bg-content/10"
+                          ? "bg-content/5 hover:bg-content/8"
                           : "hover:bg-content/5"
                       }`
         }`}
@@ -3674,17 +3635,32 @@ const SessionCard = memo(function SessionCard({
           className="min-w-0 rounded-sm outline-none"
         >
           <span className="relative flex min-w-0 items-center gap-2">
-            <HarnessIcon
+            <SessionMark
               harness={session.harness}
-              className="size-3.5 shrink-0"
+              state={
+                needsApproval
+                  ? "approval"
+                  : busy
+                    ? "working"
+                    : done
+                      ? "done"
+                      : "idle"
+              }
+              emphasized={isActive || isSelected}
             />
             {session.pinned ? (
               <Pin
-                className="size-3 shrink-0 text-content/45"
+                className="size-3 shrink-0 text-content/40"
                 strokeWidth={1.75}
               />
             ) : null}
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-5 text-content">
+            <span
+              className={`min-w-0 flex-1 truncate text-[13px] leading-[18px] ${
+                isActive || isSelected
+                  ? "font-medium text-content"
+                  : "text-content/85 group-hover:text-content"
+              }`}
+            >
               {title}
             </span>
             <span className="flex shrink-0 items-center gap-1.5">
@@ -3699,18 +3675,26 @@ const SessionCard = memo(function SessionCard({
             summary={orchestration!}
           />
         ) : null}
-        <span className="relative mt-0.5 flex min-w-0 items-center gap-2 pl-5.5">
+        <span className="relative flex min-w-0 items-center gap-1.5 pl-[26px]">
           {model ? (
             <span
-              className="min-w-0 max-w-24 shrink truncate text-[11px] leading-4 text-content/65"
+              className="min-w-0 max-w-24 shrink truncate text-[11px] leading-[16px] text-content/55"
               title={model}
             >
               {model}
             </span>
           ) : null}
+          {model && gitLabel ? (
+            <span
+              aria-hidden
+              className="shrink-0 text-[11px] leading-[16px] text-content/25"
+            >
+              ·
+            </span>
+          ) : null}
           {gitLabel ? (
             <span
-              className="flex min-w-0 flex-1 items-center gap-1 text-[11px] text-content/60"
+              className="flex min-w-0 flex-1 items-center gap-1 text-[11px] leading-[16px] text-content/50"
               title={
                 session.worktreeCwd
                   ? `${gitLabel}\n${session.worktreeCwd}`

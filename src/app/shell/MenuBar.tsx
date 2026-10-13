@@ -32,7 +32,6 @@ type Props = {
   onFindInProject?: () => void;
   onSearch?: () => void;
   onOpenInbox?: () => void;
-  onOpenNotes?: () => void;
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onZoomReset?: () => void;
@@ -53,7 +52,6 @@ export function MenuBar({
   onFindInProject,
   onSearch,
   onOpenInbox,
-  onOpenNotes,
   onZoomIn,
   onZoomOut,
   onZoomReset,
@@ -73,10 +71,7 @@ export function MenuBar({
     [],
   );
 
-  useEffect(
-    () => subscribeAutosave(() => setAutosave(loadAutosave())),
-    [],
-  );
+  useEffect(() => subscribeAutosave(() => setAutosave(loadAutosave())), []);
 
   const shortcut = (command: string, keys: string) =>
     keybindingShortcutLabel(command, keys) ?? undefined;
@@ -159,9 +154,6 @@ export function MenuBar({
         case "open_inbox":
           onOpenInbox?.();
           break;
-        case "open_notes":
-          onOpenNotes?.();
-          break;
         case "go_to_file":
           onGoToFile?.();
           break;
@@ -222,7 +214,6 @@ export function MenuBar({
       onPickProject,
       onSearch,
       onOpenInbox,
-      onOpenNotes,
       onShowSourceControl,
       onToggleSidebar,
       onToggleSessionSidebar,
@@ -329,10 +320,7 @@ export function MenuBar({
               `${MOD}${SHIFT}B`,
             ),
           },
-          { kind: "item", id: "open_inbox", label: "Inbox" },
-          ...(onOpenNotes
-            ? [{ kind: "item" as const, id: "open_notes", label: "Notes" }]
-            : []),
+          { kind: "item", id: "open_inbox", label: "PRs & issues" },
           {
             kind: "item",
             id: "toggle_terminal",

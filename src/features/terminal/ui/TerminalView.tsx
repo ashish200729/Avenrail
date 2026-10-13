@@ -371,7 +371,7 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
       cancelAnimationFrame(frame);
       if (raf) cancelAnimationFrame(raf);
       observer.disconnect();
-      outer.classList.remove("monocode-terminal--alt-screen");
+      outer.classList.remove("avenrail-terminal--alt-screen");
       applySizeRef.current = () => {};
       host.removeEventListener("copy", onCopy);
       host.removeEventListener("paste", onPaste);
@@ -448,12 +448,12 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
   return (
     <div
       ref={outerRef}
-      className="monocode-terminal flex h-full w-full min-h-0 min-w-0 flex-col"
+      className="avenrail-terminal flex h-full w-full min-h-0 min-w-0 flex-col"
       onMouseDown={() => termRef.current?.focus()}
     >
       <div
         ref={hostRef}
-        className="monocode-terminal-host min-h-0 min-w-0 flex-1 overflow-hidden"
+        className="avenrail-terminal-host min-h-0 min-w-0 flex-1 overflow-hidden"
       />
     </div>
   );

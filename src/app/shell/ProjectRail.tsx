@@ -4,11 +4,10 @@ import {
   ChevronRight,
   FolderPlus,
   Internet,
-  Inbox,
+  Triage,
   MoreHorizontal,
   Pin,
   PinOff,
-  File,
   Plus,
   Search,
   Settings,
@@ -131,9 +130,6 @@ type Props = {
   searchActive?: boolean;
   onOpenInbox?: () => void;
   inboxActive?: boolean;
-  notesEnabled?: boolean;
-  onOpenNotes?: () => void;
-  notesActive?: boolean;
   onOpenAutomations?: () => void;
   automationsActive?: boolean;
   onTogglePanel?: () => void;
@@ -173,9 +169,6 @@ export function ProjectRail({
   searchActive = false,
   onOpenInbox,
   inboxActive = false,
-  notesEnabled = true,
-  onOpenNotes,
-  notesActive = false,
   onOpenAutomations,
   automationsActive = false,
   onTogglePanel,
@@ -438,40 +431,33 @@ export function ProjectRail({
                 shortcut={`${MOD}K`}
                 ariaLabel={`Search (${MOD}K)`}
               />
-              <div className="mt-0.5" />
-              <div ref={inboxActionRef}>
+              <div className="mt-1.5 flex flex-col gap-px">
+                <div ref={inboxActionRef} className="min-w-0">
+                  <RailAction
+                    label="PRs & issues"
+                    icon={Triage}
+                    onClick={onOpenInbox}
+                    onOpenContextMenu={(x, y) => {
+                      menuTrigger.current =
+                        inboxActionRef.current?.querySelector("button") ?? null;
+                      menuTrigger.current?.focus();
+                      projectMenu.close();
+                      setInboxMenu({ x, y });
+                    }}
+                    active={inboxActive}
+                    dot={inboxUnseen}
+                    ariaLabel={
+                      inboxUnseen ? "PRs & issues, new items" : "PRs & issues"
+                    }
+                  />
+                </div>
                 <RailAction
-                  label="Inbox"
-                  icon={Inbox}
-                  onClick={onOpenInbox}
-                  onOpenContextMenu={(x, y) => {
-                    menuTrigger.current =
-                      inboxActionRef.current?.querySelector("button") ?? null;
-                    menuTrigger.current?.focus();
-                    projectMenu.close();
-                    setInboxMenu({ x, y });
-                  }}
-                  active={inboxActive}
-                  dot={inboxUnseen}
-                  ariaLabel={inboxUnseen ? "Inbox, new items" : "Inbox"}
+                  label="Automations"
+                  icon={Zap}
+                  onClick={onOpenAutomations}
+                  active={automationsActive}
                 />
               </div>
-              {notesEnabled ? (
-                <RailAction
-                  label="Notes"
-                  icon={File}
-                  onClick={onOpenNotes}
-                  active={notesActive}
-                  ariaLabel="Notes"
-                />
-              ) : null}
-              <RailAction
-                label="Automations"
-                icon={Zap}
-                onClick={onOpenAutomations}
-                active={automationsActive}
-                ariaLabel="Automations"
-              />
             </div>
 
             {sessionControls}
@@ -493,10 +479,7 @@ export function ProjectRail({
                   sortable={pinnedSortable}
                   pinned
                   searchActive={
-                    searchActive ||
-                    inboxActive ||
-                    notesActive ||
-                    automationsActive
+                    searchActive || inboxActive || automationsActive
                   }
                   onSelect={onSelectProject}
                   onTogglePin={toggleProjectPin}
@@ -527,10 +510,7 @@ export function ProjectRail({
                         busy={busy}
                         statsEnabled={visible}
                         searchActive={
-                          searchActive ||
-                          inboxActive ||
-                          notesActive ||
-                          automationsActive
+                          searchActive || inboxActive || automationsActive
                         }
                         onSelect={onSelectProject}
                         onTogglePin={toggleProjectPin}
@@ -572,12 +552,7 @@ export function ProjectRail({
                 statsEnabled={visible}
                 sortable={projectSortable}
                 pinned={false}
-                searchActive={
-                  searchActive ||
-                  inboxActive ||
-                  notesActive ||
-                  automationsActive
-                }
+                searchActive={searchActive || inboxActive || automationsActive}
                 onSelect={onSelectProject}
                 onTogglePin={toggleProjectPin}
                 onContextMenu={onProjectContextMenu}
@@ -738,7 +713,7 @@ function ProjectSectionHeader({
 }) {
   return (
     <div className="flex items-center gap-1 px-3 pb-1.5 pt-1">
-      <span className="min-w-0 flex-1 truncate px-1 text-xs text-content/50">
+      <span className="min-w-0 flex-1 truncate px-1 text-[11px] font-medium uppercase tracking-[0.08em] text-content/40">
         {label}
       </span>
       {onAddGroup ? (
@@ -957,7 +932,7 @@ function ProjectCard({
   const fallbackName = basename(item.path);
   const sessionLayout = useContext(ProjectSessionsContext);
   const contentId = useId();
-  const collapsedKey = `monocode.projectSessionsCollapsed.${projectKey(item.path)}`;
+  const collapsedKey = `avenrail.projectSessionsCollapsed.${projectKey(item.path)}`;
   const [expanded, setExpanded] = useState(() => {
     try {
       const value = localStorage.getItem(collapsedKey);

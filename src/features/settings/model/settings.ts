@@ -15,7 +15,7 @@ import {
 } from "../../quick-composer/model/quickComposerShortcut";
 import { readFlag, writeFlag } from "./storageFlags";
 
-const SECTION_KEY = "monocode.settingsSection";
+const SECTION_KEY = "avenrail.settingsSection";
 
 export type SettingsSectionId =
   | "general"
@@ -55,7 +55,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: "General",
     description:
       "The build you are running, how Avenrail reaches you, and the panels it shows.",
-    keywords: "version update sounds notifications notes rail",
+    keywords: "version update sounds notifications rail",
   },
   {
     id: "connections",
@@ -103,8 +103,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     id: "mcp",
     group: "agents",
     label: "MCP",
-    description: "Find MCP servers across providers and manage their connections.",
-    keywords: "tools servers connections oauth authenticate login claude codex cursor opencode",
+    description:
+      "Find MCP servers across providers and manage their connections.",
+    keywords:
+      "tools servers connections oauth authenticate login claude codex cursor opencode",
   },
   {
     id: "skills",
@@ -117,9 +119,9 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: "inbox",
     group: "workspace",
-    label: "Inbox",
+    label: "PRs & issues",
     description:
-      "Manage Inbox services and notification preferences for each project.",
+      "Manage PRs & issues services and notification preferences for each project.",
     keywords:
       "github gitlab linear jira atlassian azure devops connect token integration",
   },
@@ -162,7 +164,12 @@ export type SettingsEntry = {
 };
 
 export const SETTINGS_INDEX: SettingsEntry[] = [
-  { id: "remote-machines", section: "connections", label: "Your machines", keywords: "ssh remote connect host server environment" },
+  {
+    id: "remote-machines",
+    section: "connections",
+    label: "Your machines",
+    keywords: "ssh remote connect host server environment",
+  },
   {
     id: "mcp-servers",
     section: "mcp",
@@ -192,12 +199,6 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     section: "general",
     label: "Notifications",
     keywords: "notify alert toast permission reminder background",
-  },
-  {
-    id: "notes",
-    section: "general",
-    label: "Notes",
-    keywords: "notebook markdown rail scratchpad",
   },
   ...(IS_MAC
     ? [
@@ -356,7 +357,8 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     id: "agent-clis",
     section: "providers",
     label: "Agent CLIs",
-    keywords: "codex opencode cursor grok pi omp fx hermes antigravity binary path",
+    keywords:
+      "codex opencode cursor grok pi omp fx hermes antigravity binary path",
   },
   {
     id: "provider-accounts",
@@ -523,19 +525,19 @@ export function saveSettingsSection(id: SettingsSectionId) {
   }
 }
 
-const COMPOSER_RUNNER_KEY = "monocode.composerRunner";
+const COMPOSER_RUNNER_KEY = "avenrail.composerRunner";
 
-const FOLLOW_UP_BEHAVIOR_KEY = "monocode.followUpBehavior";
+const FOLLOW_UP_BEHAVIOR_KEY = "avenrail.followUpBehavior";
 
-const COMPOSER_EFFORT_VISIBLE_KEY = "monocode.composerEffortVisible";
+const COMPOSER_EFFORT_VISIBLE_KEY = "avenrail.composerEffortVisible";
 
-const MODEL_CONTROLS_KEY = "monocode.modelControls";
+const MODEL_CONTROLS_KEY = "avenrail.modelControls";
 
-const FILE_TAB_MODE_KEY = "monocode.fileTabMode";
+const FILE_TAB_MODE_KEY = "avenrail.fileTabMode";
 
-const TAB_ANIMATIONS_ENABLED_KEY = "monocode.tabAnimationsEnabled";
+const TAB_ANIMATIONS_ENABLED_KEY = "avenrail.tabAnimationsEnabled";
 
-const COLLAPSED_PROJECT_RAIL_MODE_KEY = "monocode.collapsedProjectRailMode";
+const COLLAPSED_PROJECT_RAIL_MODE_KEY = "avenrail.collapsedProjectRailMode";
 
 export type FollowUpBehavior = "steer" | "queue";
 
@@ -598,7 +600,7 @@ export const COLLAPSED_PROJECT_RAIL_MODE_DEFAULT: CollapsedProjectRailMode =
   "compact";
 
 export const COLLAPSED_PROJECT_RAIL_MODE_CHANGE_EVENT =
-  "monocode:collapsed-project-rail-mode-change";
+  "avenrail:collapsed-project-rail-mode-change";
 
 export function loadCollapsedProjectRailMode(): CollapsedProjectRailMode {
   try {
@@ -644,7 +646,7 @@ export type ModelControls = "menu" | "beside";
 export const MODEL_CONTROLS_DEFAULT: ModelControls = "menu";
 
 /** Fired on `window` when the composer model controls setting flips. */
-export const MODEL_CONTROLS_CHANGE_EVENT = "monocode:model-controls-change";
+export const MODEL_CONTROLS_CHANGE_EVENT = "avenrail:model-controls-change";
 
 export function loadModelControls(): ModelControls {
   try {
@@ -685,7 +687,7 @@ export function subscribeModelControls(onStoreChange: () => void) {
 export const COMPOSER_RUNNER_DEFAULT = true;
 
 /** Fired on `window` when the composer mascot setting flips. */
-export const COMPOSER_RUNNER_CHANGE_EVENT = "monocode:composer-runner-change";
+export const COMPOSER_RUNNER_CHANGE_EVENT = "avenrail:composer-runner-change";
 
 export function loadComposerRunner(): boolean {
   return readFlag(COMPOSER_RUNNER_KEY) ?? COMPOSER_RUNNER_DEFAULT;
@@ -699,34 +701,20 @@ export function saveComposerRunner(value: boolean) {
   );
 }
 
-const NOTES_ENABLED_KEY = "monocode.notesEnabled";
-
-export const NOTES_ENABLED_DEFAULT = true;
-
-/** Fired on `window` when the Notes UI setting flips. */
-export const NOTES_ENABLED_CHANGE_EVENT = "monocode:notes-enabled-change";
-
+/**
+ * Notes were retired from the product. These stay as constants so the composer
+ * and transcript affordances that still ask keep their note actions hidden.
+ */
 export function loadNotesEnabled(): boolean {
-  return readFlag(NOTES_ENABLED_KEY) ?? NOTES_ENABLED_DEFAULT;
+  return false;
 }
 
-export function saveNotesEnabled(value: boolean) {
-  writeFlag(NOTES_ENABLED_KEY, value);
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent<boolean>(NOTES_ENABLED_CHANGE_EVENT, { detail: value }),
-  );
+export function subscribeNotesEnabled(): () => void {
+  return () => {};
 }
 
-export function subscribeNotesEnabled(onStoreChange: () => void) {
-  if (typeof window === "undefined") return () => {};
-  window.addEventListener(NOTES_ENABLED_CHANGE_EVENT, onStoreChange);
-  return () =>
-    window.removeEventListener(NOTES_ENABLED_CHANGE_EVENT, onStoreChange);
-}
-
-const QUICK_COMPOSER_ENABLED_KEY = "monocode.quickComposerEnabled";
-const QUICK_COMPOSER_SHORTCUT_KEY = "monocode.quickComposerShortcut";
+const QUICK_COMPOSER_ENABLED_KEY = "avenrail.quickComposerEnabled";
+const QUICK_COMPOSER_SHORTCUT_KEY = "avenrail.quickComposerShortcut";
 
 export const QUICK_COMPOSER_ENABLED_DEFAULT = true;
 
@@ -761,13 +749,13 @@ export function saveQuickComposerShortcut(value: string) {
   }
 }
 
-const LIVE_AGENTS_ENABLED_KEY = "monocode.liveAgentsEnabled";
+const LIVE_AGENTS_ENABLED_KEY = "avenrail.liveAgentsEnabled";
 
 export const LIVE_AGENTS_ENABLED_DEFAULT = true;
 
 /** Fired on `window` when the working-agents rail card setting flips. */
 export const LIVE_AGENTS_ENABLED_CHANGE_EVENT =
-  "monocode:live-agents-enabled-change";
+  "avenrail:live-agents-enabled-change";
 
 export function loadLiveAgentsEnabled(): boolean {
   return readFlag(LIVE_AGENTS_ENABLED_KEY) ?? LIVE_AGENTS_ENABLED_DEFAULT;
@@ -790,7 +778,7 @@ export function subscribeLiveAgentsEnabled(onStoreChange: () => void) {
     window.removeEventListener(LIVE_AGENTS_ENABLED_CHANGE_EVENT, onStoreChange);
 }
 
-const CLOSE_TO_TRAY_KEY = "monocode.closeToTray";
+const CLOSE_TO_TRAY_KEY = "avenrail.closeToTray";
 
 export const CLOSE_TO_TRAY_DEFAULT = true;
 
@@ -804,13 +792,13 @@ export function saveCloseToTray(value: boolean) {
   writeFlag(CLOSE_TO_TRAY_KEY, value);
 }
 
-const GRID_ARCADE_ENABLED_KEY = "monocode.gridArcadeEnabled";
+const GRID_ARCADE_ENABLED_KEY = "avenrail.gridArcadeEnabled";
 
 export const GRID_ARCADE_ENABLED_DEFAULT = true;
 
 /** Fired on `window` when the empty-session games setting flips. */
 export const GRID_ARCADE_ENABLED_CHANGE_EVENT =
-  "monocode:grid-arcade-enabled-change";
+  "avenrail:grid-arcade-enabled-change";
 
 export function loadGridArcadeEnabled(): boolean {
   return readFlag(GRID_ARCADE_ENABLED_KEY) ?? GRID_ARCADE_ENABLED_DEFAULT;
@@ -833,14 +821,14 @@ export function subscribeGridArcadeEnabled(onStoreChange: () => void) {
     window.removeEventListener(GRID_ARCADE_ENABLED_CHANGE_EVENT, onStoreChange);
 }
 
-const DIFF_VIEWER_KEY = "monocode.diffViewer";
+const DIFF_VIEWER_KEY = "avenrail.diffViewer";
 
 export type DiffViewer = "editor" | "unified";
 
 export const DIFF_VIEWER_DEFAULT: DiffViewer = "editor";
 
 /** Fired on `window` when the working-tree diff layout flips. */
-export const DIFF_VIEWER_CHANGE_EVENT = "monocode:diff-viewer-change";
+export const DIFF_VIEWER_CHANGE_EVENT = "avenrail:diff-viewer-change";
 
 function isDiffViewer(value: unknown): value is DiffViewer {
   return value === "editor" || value === "unified";
@@ -875,7 +863,7 @@ export function subscribeDiffViewer(onStoreChange: () => void) {
     window.removeEventListener(DIFF_VIEWER_CHANGE_EVENT, onStoreChange);
 }
 
-const FORMAT_ON_SAVE_KEY = "monocode.formatOnSave";
+const FORMAT_ON_SAVE_KEY = "avenrail.formatOnSave";
 
 export const FORMAT_ON_SAVE_DEFAULT = true;
 
@@ -887,8 +875,8 @@ export function saveFormatOnSave(value: boolean) {
   writeFlag(FORMAT_ON_SAVE_KEY, value);
 }
 
-const AUTOSAVE_KEY = "monocode.autosave";
-const AUTOSAVE_CHANGE_EVENT = "monocode:autosave-change";
+const AUTOSAVE_KEY = "avenrail.autosave";
+const AUTOSAVE_CHANGE_EVENT = "avenrail:autosave-change";
 
 export const AUTOSAVE_DEFAULT = false;
 
@@ -918,7 +906,7 @@ export function subscribeAutosave(onStoreChange: () => void) {
   };
 }
 
-const CLAUDE_HOOKS_KEY = "monocode.claudeHooks";
+const CLAUDE_HOOKS_KEY = "avenrail.claudeHooks";
 
 export const CLAUDE_HOOKS_DEFAULT = true;
 
@@ -1044,8 +1032,8 @@ export const KEYBINDINGS: KeybindingRow[] = [
   { command: "Editor: Replace", keys: `${MOD}${ALT}F`, when: "editorFocus" },
 ];
 
-const KEYBINDING_OVERRIDES_KEY = "monocode.keybindingOverrides";
-const KEYBINDINGS_CHANGE_EVENT = "monocode:keybindings-change";
+const KEYBINDING_OVERRIDES_KEY = "avenrail.keybindingOverrides";
+const KEYBINDINGS_CHANGE_EVENT = "avenrail:keybindings-change";
 
 export type KeybindingOverride = {
   disabled?: boolean;
@@ -1113,9 +1101,7 @@ function defaultShortcutsFor(command: string): string[] {
     return value ? [value] : [];
   };
   if (row.keys.includes("…")) {
-    return [1, 2, 3, 4, 5, 6, 7, 8].flatMap((digit) =>
-      chords(`Digit${digit}`),
-    );
+    return [1, 2, 3, 4, 5, 6, 7, 8].flatMap((digit) => chords(`Digit${digit}`));
   }
   if (/^[A-Za-z]$/.test(rest)) return chords(`Key${rest.toUpperCase()}`);
   if (/^[0-9]$/.test(rest)) return chords(`Digit${rest}`);
@@ -1135,9 +1121,7 @@ function shortcutOwners(): Map<string, string> {
         : defaultShortcutsFor(row.command);
     for (const chord of chords) owners.set(chord, row.command);
   }
-  for (const [command, override] of Object.entries(
-    loadKeybindingOverrides(),
-  )) {
+  for (const [command, override] of Object.entries(loadKeybindingOverrides())) {
     if (override.shortcut) owners.set(override.shortcut, command);
   }
   return owners;
@@ -1288,9 +1272,7 @@ export function keybindingShortcutTokens(
 ): string | null {
   const override = loadKeybindingOverrides()[command];
   if (override?.disabled) return null;
-  return override?.shortcut
-    ? shortcutTokens(override.shortcut)
-    : fallback;
+  return override?.shortcut ? shortcutTokens(override.shortcut) : fallback;
 }
 
 export function subscribeKeybindings(onStoreChange: () => void) {

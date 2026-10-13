@@ -125,6 +125,23 @@ fn default_root(main: &Path) -> PathBuf {
     main.with_file_name(format!("{name}-worktrees"))
 }
 
+/// Branch prefixes Avenrail creates worktrees under. `mc/` and `monocode/` are
+/// the earlier names; branches that already exist under them stay managed.
+const MANAGED_BRANCH_PREFIXES: [&str; 3] = ["av/", "mc/", "monocode/"];
+const ORCHESTRATION_BRANCH_PREFIXES: [&str; 2] = ["av/orch-", "mc/orch-"];
+
+fn is_managed_branch(branch: &str) -> bool {
+    MANAGED_BRANCH_PREFIXES
+        .iter()
+        .any(|prefix| branch.starts_with(prefix))
+}
+
+fn is_orchestration_branch(branch: &str) -> bool {
+    ORCHESTRATION_BRANCH_PREFIXES
+        .iter()
+        .any(|prefix| branch.starts_with(prefix))
+}
+
 #[tauri::command(async)]
 pub fn git_worktrees(cwd: String, store: State<'_, SessionStore>) -> Result<Worktrees, String> {
     let mut worktrees = list(&expand_home(&cwd))?;
@@ -412,7 +429,7 @@ fn rename_branch(root: &Path, path: &Path, branch: &str) -> Result<Worktree, Str
         return Err("The main working copy cannot be renamed here".into());
     }
     let current = tree.branch.as_deref().ok_or("The worktree is detached")?;
-    if !current.starts_with("mc/") && !current.starts_with("monocode/") {
+    if !is_managed_branch(current) {
         return Err("Only automatically created worktree branches can be renamed".into());
     }
     if current == branch {
@@ -739,7 +756,7 @@ pub fn git_orchestration_worktree_remove(
     let conn = store.lock_conn()?;
     let removed = remove_with_sessions(&conn, &root, &path, true, true)?;
     if let Some(branch) = branch {
-        if branch.starts_with("mc/orch-") {
+        if is_orchestration_branch(&branch) {
             if let Err(error) = git(Path::new(&removed.project_cwd), &["branch", "-D", &branch]) {
                 eprintln!("Orchestration worktree removed; temporary branch cleanup will need a retry: {error}");
             }
@@ -753,7 +770,7 @@ pub async fn git_orchestration_branch_remove(cwd: String, branch: String) -> Res
     tauri::async_runtime::spawn_blocking(move || {
         let root = expand_home(&cwd);
         let branch = branch.trim();
-        if !branch.starts_with("mc/orch-") {
+        if !is_orchestration_branch(branch) {
             return Err("Only orchestration temporary branches can be removed here".into());
         }
         git(&root, &["check-ref-format", "--branch", branch])?;
@@ -775,6 +792,18 @@ pub async fn git_orchestration_branch_remove(cwd: String, branch: String) -> Res
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn managed_branches_include_earlier_prefixes() {
+        for branch in ["av/feature", "mc/feature", "monocode/feature"] {
+            assert!(is_managed_branch(branch), "{branch}");
+        }
+        assert!(!is_managed_branch("main"));
+        assert!(!is_managed_branch("feature/av/x"));
+        assert!(is_orchestration_branch("av/orch-abc"));
+        assert!(is_orchestration_branch("mc/orch-abc"));
+        assert!(!is_orchestration_branch("av/abc"));
+    }
+
     use super::*;
 
     struct Repo(PathBuf);
@@ -785,7 +814,7 @@ mod tests {
     }
     fn repo() -> Repo {
         let dir =
-            std::env::temp_dir().join(format!("monocode-worktree-test-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("avenrail-worktree-test-{}", uuid::Uuid::new_v4()));
         let root = dir.join("repo");
         std::fs::create_dir_all(&root).unwrap();
         git_checked(&root, &["init", "-b", "main"]).unwrap();

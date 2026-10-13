@@ -32,13 +32,13 @@ it("keeps paths and environment content from injecting service configuration", (
 it.skipIf(process.platform === "win32").each(["darwin", "linux"] as const)(
   "removes the %s service registration but keeps host data",
   async (platform) => {
-    const home = mkdtempSync(join(tmpdir(), "monocode-service-test-"));
+    const home = mkdtempSync(join(tmpdir(), "avenrail-service-test-"));
     try {
       const service =
         platform === "darwin"
-          ? join(home, "Library/LaunchAgents/com.monocode.host.plist")
-          : join(home, ".config/systemd/user/monocode-host.service");
-      const data = join(home, ".monocode-host/host.db");
+          ? join(home, "Library/LaunchAgents/com.avenrail.host.plist")
+          : join(home, ".config/systemd/user/avenrail-host.service");
+      const data = join(home, ".avenrail-host/host.db");
       for (const file of [service, data]) {
         mkdirSync(dirname(file), { recursive: true });
         writeFileSync(file, "existing");
@@ -64,7 +64,7 @@ it.skipIf(process.platform === "win32").each(["darwin", "linux"] as const)(
           "--user",
           "disable",
           "--now",
-          "monocode-host.service",
+          "avenrail-host.service",
         ]);
         expect(notes.join("\n")).toContain("loginctl disable-linger");
       }
@@ -82,5 +82,5 @@ it("unregisters only this user's Windows task", async () => {
   });
   expect(scripts[0]).toContain('"Avenrail Host-$sid"');
   expect(scripts[0]).toContain("Unregister-ScheduledTask");
-  expect(scripts[0]).not.toMatch(/Remove-Item|\.monocode-host/);
+  expect(scripts[0]).not.toMatch(/Remove-Item|\.avenrail-host/);
 });

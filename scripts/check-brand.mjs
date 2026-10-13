@@ -43,7 +43,10 @@ assert.match(
   ),
 );
 assert.match(read("index.html"), new RegExp(`<title>${brand.name}</title>`));
-assert.match(read("quick-composer.html"), new RegExp(`<title>${brand.name}</title>`));
+assert.match(
+  read("quick-composer.html"),
+  new RegExp(`<title>${brand.name}</title>`),
+);
 assert.ok(!read("src-tauri/src/main.rs").includes("monocode_lib"));
 assert.ok(read("index.html").includes(brand.icon));
 assert.ok(read("public/avenrail.svg").includes(`<title>${brand.name}</title>`));
@@ -51,11 +54,13 @@ assert.ok(read("public/avenrail.svg").includes(`<title>${brand.name}</title>`));
 // Protect installed data and updater identity, not just the visible name.
 assert.equal(config.identifier, "com.monocode.desktop");
 assert.equal(config.identifier, brand.legacyBundleIdentifier);
+const sessionStore = read("src-tauri/src/session_store.rs");
+assert.ok(sessionStore.includes('const DATABASE_FILE: &str = "avenrail.db";'));
 assert.ok(
-  read("src-tauri/src/session_store.rs").includes(
-    'data_dir.join("monocode.db")',
-  ),
+  sessionStore.includes('const LEGACY_DATABASE_FILE: &str = "monocode.db";'),
 );
+assert.ok(read("index.html").includes("/legacy-storage.js"));
+assert.ok(read("quick-composer.html").includes("/legacy-storage.js"));
 assert.ok(
   read("src-tauri/src/macos.rs").includes(
     `<string>${config.identifier}</string>`,
@@ -70,7 +75,11 @@ assert.ok(!existsSync(join(root, "src-tauri/macos/Assets.car")));
 assert.ok(!read("src-tauri/Info.plist").includes("CFBundleIconName"));
 assert.ok(!config.bundle.resources?.["macos/Assets.car"]);
 assert.ok(!read("src/app/App.tsx").includes("<UsageFooter"));
-assert.ok(!read("src/features/sessions/ui/EmptySession.tsx").includes("TerminalGridBackground"));
+assert.ok(
+  !read("src/features/sessions/ui/EmptySession.tsx").includes(
+    "TerminalGridBackground",
+  ),
+);
 assert.ok(
   read("src-tauri/Cargo.toml").includes(
     "https://github.com/ashish200729/Avenrail",
@@ -105,15 +114,55 @@ function walk(dir) {
         : [`${dir}/${item.name}`],
   );
 }
-for (const file of [...walk("src"), ...walk("src-tauri/src")].filter(
-  (file) => /\.(tsx?|rs)$/.test(file) && !file.endsWith(".test.ts"),
-)) {
-  const source = read(file).replace(
-    '"Turn interrupted when MonoCode quit."',
-    '"legacy recovery marker"',
-  );
-  assert.ok(!source.includes("MonoCode"), `Old display name in ${file}`);
+
+// The old name may remain only where it is read for compatibility: the bundle
+// identifier, the legacy database/branch/command/tag names, and upstream links.
+const LEGACY_NAME = /mono ?code/i;
+const ALLOWED = [
+  /hardbeat920\/monocode/i,
+  /EricRasputin\/monocode/,
+  /com\.monocode\.desktop/,
+  /monocode\.db/,
+  /monocode\//,
+  /["'` ]\/monocode\b/i,
+  /monocode: true/,
+  /legacy/i,
+  /MonoCode quit/,
+  /monocode\?: boolean/,
+  /\.monocode\b/,
+  /\(\?:[^)]*monocode/,
+  /"monocode"/,
+  /monocode_(assignment|proposal)/,
+];
+const scanned = [
+  ...["src", "src-tauri/src", "host", "scripts", "public"].flatMap(walk),
+  "index.html",
+  "quick-composer.html",
+  "package.json",
+].filter(
+  (file) =>
+    /\.(tsx?|mjs|rs|py|sh|ps1|css|js|html|json|svg)$/.test(file) &&
+    // These files exist to read or migrate the old name.
+    ![
+      "scripts/check-brand.mjs",
+      "public/legacy-storage.js",
+      "src/shared/lib/legacyStorage.test.ts",
+    ].includes(file),
+);
+const leftovers = [];
+for (const file of scanned) {
+  read(file)
+    .split("\n")
+    .forEach((line, index) => {
+      if (LEGACY_NAME.test(line) && !ALLOWED.some((rule) => rule.test(line)))
+        leftovers.push(`${file}:${index + 1}: ${line.trim().slice(0, 100)}`);
+    });
 }
+assert.deepEqual(
+  leftovers,
+  [],
+  `Old product name in:\n${leftovers.join("\n")}`,
+);
 console.log(
-  `${brand.name}: display identity, package versions, desktop icons, repository links, and legacy data identifiers verified.`,
+  `${brand.name}: display identity, package versions, desktop icons, repository links, legacy data readers, and the absence of the old name verified.`,
 );

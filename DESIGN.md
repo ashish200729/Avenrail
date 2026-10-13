@@ -272,7 +272,7 @@ The identity is a signature component, not a navigation control. The boot splash
 - **Do** use the functional blue accent for actions, focus, links, and working state, and retain the existing semantic status colors.
 - **Do** support the existing dark/light theme variables, glass opacity behavior, responsive panel bounds, and `prefers-reduced-motion` behavior.
 - **Do** keep the Avenrail mark sourced from `public/avenrail.svg` and place identity only at the boot splash and About.
-- **Do** keep compatibility identifiers stable: `com.monocode.desktop`, `monocode.db`, `monocode.*` and `monocode:*` preference/local-event namespaces, and the `MonoCode.dmg` download alias. Keep `ashish200729/Avenrail` as the primary repository and `hardbeat920/monocode` as upstream.
+- **Do** keep only the bundle identifier `com.monocode.desktop` as a legacy name (changing it moves application data and desktop permissions). Everything else uses Avenrail: `avenrail.*` and `avenrail:*` preference and event namespaces, `avenrail.db`, `AVENRAIL_*` environment variables, the `avenrail-host` tooling, and `av/` worktree branches. Earlier saved data is migrated or still read; see `docs/rebrand-compatibility.md`. Keep `ashish200729/Avenrail` as the primary repository and `hardbeat920/monocode` as upstream.
 - **Do** preserve existing project directory names and saved paths, historical transcripts, updater feed configuration, signing credentials, and provider integrations.
 
 ### Don't:

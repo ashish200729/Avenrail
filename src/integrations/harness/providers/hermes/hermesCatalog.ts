@@ -13,7 +13,7 @@ import {
 } from "../../core/child";
 import { modelsFromHermesSession } from "./hermesProtocol";
 
-const PROBE_ID = "monocode-hermes-probe";
+const PROBE_ID = "avenrail-hermes-probe";
 const DISCOVERY_TIMEOUT_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 
@@ -26,7 +26,7 @@ export function refreshHermesCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("hermes", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] hermes catalog", error);
+      console.debug("[avenrail] hermes catalog", error);
     })
     .finally(() => {
       inflight = null;

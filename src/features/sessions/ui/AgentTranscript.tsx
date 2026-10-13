@@ -32,7 +32,7 @@ import {
 import { flushSync } from "react-dom";
 import { AttachmentChip } from "./AttachmentChip";
 import { GeneratedImage } from "./GeneratedImage";
-import { MonocodeSparkles } from "./MonocodeSparkles";
+import { AvenrailSparkles } from "./AvenrailSparkles";
 import { OrchestratorConstellation } from "./OrchestratorConstellation";
 import { PlanStepsBurst } from "./PlanStepsBurst";
 import { FilePreview } from "../../files/ui/FilePreview";
@@ -125,10 +125,10 @@ import {
 } from "../model/transcriptActivity";
 import { lastUserTurnBlock } from "../model/editLastTurn";
 import {
-  monoCodeToolCall,
-  monoCodeWorkSummary,
+  avenrailToolCall,
+  avenrailWorkSummary,
   type AvenrailToolCall,
-} from "../model/monocodeToolCall";
+} from "../model/avenrailToolCall";
 import {
   isOperatorUserTurn,
   operatorUserPrompt,
@@ -1612,11 +1612,11 @@ function UserMessageBlock({
   const textRef = useRef<HTMLElement>(null);
   const card = block.secondOpinion;
   const note = block.noteCard;
-  const monocode = isOperatorUserTurn(block);
+  const avenrail = isOperatorUserTurn(block);
   const text =
     card && card.kind !== "handoff"
       ? ""
-      : visibleUserPrompt(monocode ? operatorUserPrompt(block) : block.text);
+      : visibleUserPrompt(avenrail ? operatorUserPrompt(block) : block.text);
   const messageLink = text ? parseUserMessageLink(text) : null;
   const displayText = messageLink
     ? `${messageLink.beforeText}${messageLink.afterText}`
@@ -1692,7 +1692,7 @@ function UserMessageBlock({
       >
         <div
           data-draft={block.draft ? "true" : undefined}
-          data-monocode={monocode ? "true" : undefined}
+          data-avenrail={avenrail ? "true" : undefined}
           className={`user-message-bubble relative min-w-0 px-3 py-2 font-sans text-content transition-[background-color] duration-200 ${
             block.draft
               ? "border border-dashed border-content/30 bg-content/4"
@@ -1803,8 +1803,8 @@ function UserMessageBlock({
               </span>
             </div>
           ) : null}
-          {monocode ? (
-            <MonocodeSparkles blockId={block.id} startedAt={block.startedAt} />
+          {avenrail ? (
+            <AvenrailSparkles blockId={block.id} startedAt={block.startedAt} />
           ) : block.intent === "plan" ? (
             <PlanStepsBurst blockId={block.id} startedAt={block.startedAt} />
           ) : block.intent === "orchestrate" ? (
@@ -2230,7 +2230,7 @@ function ActivityPhaseGroup({
   }, [phase.steps]);
   const turnFor = useStepQueue();
   const title = activityPhaseTitle(phase, active);
-  const monoCodePhase = !!monoCodeWorkSummary(phase.steps, active);
+  const avenrailPhase = !!avenrailWorkSummary(phase.steps, active);
   // Opening a group on purpose is also how you read the line that titled it,
   // whole. The auto-open while it runs is a live view, not a reading one, and
   // a one-line note the header already shows in full has nothing to add.
@@ -2245,7 +2245,7 @@ function ActivityPhaseGroup({
   if (!phase.headline && phase.steps.length === 1) {
     return (
       <div className="flex min-w-0 items-start gap-1.5">
-        {monoCodePhase ? null : (
+        {avenrailPhase ? null : (
           <ActivityPhaseIcon kind={phase.kind} className="mt-[7px]" />
         )}
         <div className="min-w-0 flex-1">
@@ -2300,7 +2300,7 @@ function ActivityPhaseGroup({
          * between them leaves both half-drawn on top of each other.
          */}
         <span className="relative flex size-3.5 shrink-0 items-center justify-center">
-          {monoCodePhase ? (
+          {avenrailPhase ? (
             <AvenrailMark className="size-3.5 group-hover:opacity-0" />
           ) : (
             <ActivityPhaseIcon
@@ -3090,14 +3090,10 @@ function ActivityToolRow({
   onOpenDiff?: (path: string) => void;
 }) {
   const [errorOpen, setErrorOpen] = useState(false);
-  const appCall = monoCodeToolCall(block);
+  const appCall = avenrailToolCall(block);
   if (appCall) {
     return (
-      <AvenrailCallRow
-        block={block}
-        call={appCall}
-        onApproval={onApproval}
-      />
+      <AvenrailCallRow block={block} call={appCall} onApproval={onApproval} />
     );
   }
   const label = toolCallLabel(block, cwd);
@@ -3185,11 +3181,12 @@ function AvenrailCallRow({
   onApproval?: (requestId: number, decision: ApprovalDecision) => void;
 }) {
   const state = toolCallState(block);
-  const output = block.tool?.detail?.trim() || block.tool?.preview?.output?.trim();
+  const output =
+    block.tool?.detail?.trim() || block.tool?.preview?.output?.trim();
   const [errorOpen, setErrorOpen] = useState(false);
   const hasError = state === "rejected" && !!output;
   const pendingApproval = needsApproval(block);
-  const command = `monocode app ${call.action}`;
+  const command = `avenrail app ${call.action}`;
   const verb = pendingApproval
     ? "Run"
     : state === "pending"
@@ -3219,7 +3216,7 @@ function AvenrailCallRow({
     </>
   );
   return (
-    <div data-monocode-tool-call={call.action} className="min-w-0">
+    <div data-avenrail-tool-call={call.action} className="min-w-0">
       {hasError ? (
         <button
           type="button"
@@ -3231,9 +3228,7 @@ function AvenrailCallRow({
           {summary}
         </button>
       ) : (
-        <div className="flex min-w-0 items-center gap-1.5 py-1">
-          {summary}
-        </div>
+        <div className="flex min-w-0 items-center gap-1.5 py-1">{summary}</div>
       )}
       {errorOpen && hasError ? (
         <pre className="min-w-0 whitespace-pre-wrap break-words py-1 pl-5 font-mono text-[12px] leading-5 text-red-400/80">
@@ -3383,15 +3378,11 @@ function ToolCall({
 
   const frame = embedded ? "py-0.5" : "px-4 py-1";
 
-  const appCall = monoCodeToolCall(block);
+  const appCall = avenrailToolCall(block);
   if (appCall) {
     return (
       <div className={frame}>
-        <AvenrailCallRow
-          block={block}
-          call={appCall}
-          onApproval={onApproval}
-        />
+        <AvenrailCallRow block={block} call={appCall} onApproval={onApproval} />
       </div>
     );
   }

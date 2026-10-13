@@ -178,7 +178,7 @@ function bubbleCap(containerWidth: number): number {
 }
 
 beforeEach(async () => {
-  localStorage.setItem("monocode.transcriptLayout", "chat");
+  localStorage.setItem("avenrail.transcriptLayout", "chat");
   await ready;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal(
@@ -194,7 +194,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  localStorage.removeItem("monocode.transcriptLayout");
+  localStorage.removeItem("avenrail.transcriptLayout");
   act(() => root.unmount());
   container.remove();
   vi.unstubAllGlobals();

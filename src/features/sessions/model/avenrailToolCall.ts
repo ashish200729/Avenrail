@@ -76,7 +76,7 @@ function shellWords(command: string): string[] | undefined {
 }
 
 /** Recognize the actual app CLI command, not a mention of it in prose/output. */
-export function monoCodeToolCall(block: Block): AvenrailToolCall | undefined {
+export function avenrailToolCall(block: Block): AvenrailToolCall | undefined {
   if (block.role !== "tool" && block.role !== "approval") return undefined;
   // A shell preview retains the original command when the display title was
   // simplified. Never accept a shorter title in place of that command.
@@ -89,7 +89,10 @@ export function monoCodeToolCall(block: Block): AvenrailToolCall | undefined {
   const command = candidate?.trim().replace(/^Run(?:ning)?\s+command:\s*/i, "");
   if (!command) return undefined;
   const words = shellWords(command);
-  if (!words || !/(?:^|[/\\])monocode(?:\.exe)?$/i.test(words[0] ?? ""))
+  if (
+    !words ||
+    !/(?:^|[/\\])(?:avenrail|monocode)(?:\.exe)?$/i.test(words[0] ?? "")
+  )
     return undefined;
   if (words[1] !== "app") return undefined;
   const action = words[2] ?? "--help";
@@ -111,7 +114,7 @@ export function monoCodeToolCall(block: Block): AvenrailToolCall | undefined {
 }
 
 /** A group of only Avenrail calls can be named for the app, not the shell. */
-export function monoCodeWorkSummary(
+export function avenrailWorkSummary(
   steps: Block[],
   live: boolean,
 ): string | undefined {
@@ -121,7 +124,7 @@ export function monoCodeWorkSummary(
   const calls = steps.filter(
     (block) => block.role === "tool" || block.role === "approval",
   );
-  if (calls.length === 0 || calls.some((block) => !monoCodeToolCall(block))) {
+  if (calls.length === 0 || calls.some((block) => !avenrailToolCall(block))) {
     return undefined;
   }
   return live ? "Using Avenrail" : "Used Avenrail";

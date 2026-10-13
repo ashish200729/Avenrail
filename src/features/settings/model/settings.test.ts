@@ -1,4 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  loadNotesEnabled,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from "vitest";
 import {
   COMPOSER_RUNNER_DEFAULT,
   AUTOSAVE_DEFAULT,
@@ -31,7 +38,6 @@ import {
   matchCustomKeybinding,
   loadQuickComposerShortcut,
   loadTabAnimationsEnabled,
-  NOTES_ENABLED_DEFAULT,
   saveComposerRunner,
   saveAutosave,
   saveCollapsedProjectRailMode,
@@ -42,7 +48,6 @@ import {
   saveFollowUpBehavior,
   saveGridArcadeEnabled,
   saveLiveAgentsEnabled,
-  saveNotesEnabled,
   saveKeybindingOverride,
   type KeybindingOverride,
   saveQuickComposerShortcut,
@@ -50,21 +55,20 @@ import {
 } from "./settings";
 import { IS_MAC, MOD, SHIFT } from "../../../platform/tauri/platform";
 
-const KEY = "monocode.composerRunner";
-const MODEL_CONTROLS_KEY = "monocode.modelControls";
-const LEGACY_EFFORT_VISIBLE_KEY = "monocode.composerEffortVisible";
-const NOTES_KEY = "monocode.notesEnabled";
-const KEYBINDING_OVERRIDES_KEY = "monocode.keybindingOverrides";
-const QUICK_COMPOSER_SHORTCUT_KEY = "monocode.quickComposerShortcut";
-const LIVE_AGENTS_KEY = "monocode.liveAgentsEnabled";
-const GRID_ARCADE_KEY = "monocode.gridArcadeEnabled";
-const DIFF_VIEWER_KEY = "monocode.diffViewer";
-const FORMAT_ON_SAVE_KEY = "monocode.formatOnSave";
-const AUTOSAVE_KEY = "monocode.autosave";
-const FILE_TAB_MODE_KEY = "monocode.fileTabMode";
-const FOLLOW_UP_BEHAVIOR_KEY = "monocode.followUpBehavior";
-const TAB_ANIMATIONS_KEY = "monocode.tabAnimationsEnabled";
-const COLLAPSED_PROJECT_RAIL_MODE_KEY = "monocode.collapsedProjectRailMode";
+const KEY = "avenrail.composerRunner";
+const MODEL_CONTROLS_KEY = "avenrail.modelControls";
+const LEGACY_EFFORT_VISIBLE_KEY = "avenrail.composerEffortVisible";
+const KEYBINDING_OVERRIDES_KEY = "avenrail.keybindingOverrides";
+const QUICK_COMPOSER_SHORTCUT_KEY = "avenrail.quickComposerShortcut";
+const LIVE_AGENTS_KEY = "avenrail.liveAgentsEnabled";
+const GRID_ARCADE_KEY = "avenrail.gridArcadeEnabled";
+const DIFF_VIEWER_KEY = "avenrail.diffViewer";
+const FORMAT_ON_SAVE_KEY = "avenrail.formatOnSave";
+const AUTOSAVE_KEY = "avenrail.autosave";
+const FILE_TAB_MODE_KEY = "avenrail.fileTabMode";
+const FOLLOW_UP_BEHAVIOR_KEY = "avenrail.followUpBehavior";
+const TAB_ANIMATIONS_KEY = "avenrail.tabAnimationsEnabled";
+const COLLAPSED_PROJECT_RAIL_MODE_KEY = "avenrail.collapsedProjectRailMode";
 
 describe("follow-up behavior setting", () => {
   beforeEach(mockLocalStorage);
@@ -166,23 +170,9 @@ describe("model controls setting", () => {
   });
 });
 
-describe("notes enabled setting", () => {
-  beforeEach(mockLocalStorage);
-  afterEach(() => {
-    localStorage.removeItem(NOTES_KEY);
-  });
-
-  it("defaults to on", () => {
-    expect(NOTES_ENABLED_DEFAULT).toBe(true);
-    expect(loadNotesEnabled()).toBe(true);
-  });
-
-  it("persists an off switch", () => {
-    saveNotesEnabled(false);
-    expect(localStorage.getItem(NOTES_KEY)).toBe("0");
+describe("notes setting", () => {
+  it("stays off because Notes were retired", () => {
     expect(loadNotesEnabled()).toBe(false);
-    saveNotesEnabled(true);
-    expect(loadNotesEnabled()).toBe(true);
   });
 });
 

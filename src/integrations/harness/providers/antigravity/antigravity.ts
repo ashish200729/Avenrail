@@ -454,7 +454,7 @@ async function startLive(input: SendTurnInput, life: number): Promise<Live> {
       if (live || !retired()) emit({ type: "session.ended", code });
     },
     (line) => {
-      console.debug("[monocode] antigravity stderr", line);
+      console.debug("[avenrail] antigravity stderr", line);
     },
   );
 

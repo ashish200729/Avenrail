@@ -262,13 +262,13 @@ export function githubStatus(): Promise<GithubStatus> {
 }
 
 /** Whether the active GitHub CLI account has starred Avenrail. */
-export function githubMonocodeStarStatus(): Promise<GithubStarStatus> {
-  return invoke<GithubStarStatus>("github_monocode_star_status");
+export function githubAvenrailStarStatus(): Promise<GithubStarStatus> {
+  return invoke<GithubStarStatus>("github_avenrail_star_status");
 }
 
 /** Star Avenrail for the active GitHub CLI account. */
-export function starMonocodeOnGithub(): Promise<void> {
-  return invoke<void>("github_star_monocode");
+export function starAvenrailOnGithub(): Promise<void> {
+  return invoke<void>("github_star_avenrail");
 }
 
 export async function githubRepo(cwd: string): Promise<string> {

@@ -15,7 +15,7 @@ import {
   watchChild,
 } from "../../core/child";
 
-const PROBE_ID = "monocode-cursor-probe";
+const PROBE_ID = "avenrail-cursor-probe";
 const DISCOVERY_TIMEOUT_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 12_000;
 
@@ -34,7 +34,7 @@ export function refreshCursorCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("cursor", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] cursor catalog", error);
+      console.debug("[avenrail] cursor catalog", error);
     })
     .finally(() => {
       inflight = null;
@@ -44,12 +44,12 @@ export function refreshCursorCatalog(): Promise<void> {
 
 export async function discoverCursorModels(workingDirectory?: string): Promise<AgentModel[]> {
   const fromAcp = await discoverViaAcp(workingDirectory).catch((error: unknown) => {
-    console.debug("[monocode] cursor ACP catalog failed", error);
+    console.debug("[avenrail] cursor ACP catalog failed", error);
     return [];
   });
   if (fromAcp.length > 0) return fromAcp;
   return discoverViaCli(workingDirectory).catch((error: unknown) => {
-    console.debug("[monocode] cursor CLI catalog failed", error);
+    console.debug("[avenrail] cursor CLI catalog failed", error);
     return [];
   });
 }

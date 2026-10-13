@@ -206,7 +206,7 @@ export function JiraSettings() {
             </SecondaryButton>
           </div>
           <p className="text-[12px] text-content/45">
-            Unchecked projects stay out of the inbox.
+            Unchecked projects stay out of PRs & issues.
           </p>
           {projects.map((project) => (
             <label

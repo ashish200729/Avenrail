@@ -62,6 +62,7 @@ import {
   HelpCircleIcon,
   ImageAdd01Icon,
   InboxIcon,
+  Task01Icon,
   NotificationOff01Icon,
   KeyboardIcon,
   LayoutAlignRightIcon,
@@ -266,6 +267,7 @@ export const Globe = wrap(GlobeIcon, "Globe");
 export const Internet = wrap(InternetIcon, "Internet");
 export const ImagePlus = wrap(ImageAdd01Icon, "ImagePlus");
 export const Inbox = wrap(InboxIcon, "Inbox");
+export const Triage = wrap(Task01Icon, "Triage");
 export const BellOff = wrap(NotificationOff01Icon, "BellOff");
 export const Keyboard = wrap(KeyboardIcon, "Keyboard");
 export const ListBullet = wrap(LeftToRightListBulletIcon, "ListBullet");

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -88,8 +88,42 @@ fn init_with(
     open: impl FnOnce(PathBuf) -> Result<SessionStore, String>,
     manage: impl FnOnce(SessionStore),
 ) -> Result<(), String> {
-    let store = open(data_dir()?.join("monocode.db"))?;
+    let dir = data_dir()?;
+    migrate_legacy_database(&dir)?;
+    let store = open(dir.join(DATABASE_FILE))?;
     manage(store);
+    Ok(())
+}
+
+const DATABASE_FILE: &str = "avenrail.db";
+const LEGACY_DATABASE_FILE: &str = "monocode.db";
+
+/// Moves the database written under the earlier app name to its current
+/// filename so existing conversations open in place. The SQLite sidecars move
+/// first and the main file last, so an interrupted move resumes on the next
+/// launch instead of leaving committed WAL writes behind.
+fn migrate_legacy_database(dir: &Path) -> Result<(), String> {
+    let legacy = dir.join(LEGACY_DATABASE_FILE);
+    if dir.join(DATABASE_FILE).exists() || !legacy.exists() {
+        return Ok(());
+    }
+    let moves = ["-wal", "-shm", "-journal", ""].map(|suffix| {
+        (
+            dir.join(format!("{LEGACY_DATABASE_FILE}{suffix}")),
+            dir.join(format!("{DATABASE_FILE}{suffix}")),
+        )
+    });
+    for (from, to) in moves {
+        if from.exists() {
+            std::fs::rename(&from, &to).map_err(|error| {
+                format!(
+                    "Could not move {} to {}: {error}",
+                    from.display(),
+                    to.display()
+                )
+            })?;
+        }
+    }
     Ok(())
 }
 
@@ -1983,17 +2017,60 @@ mod tests {
     use serde_json::json;
     use std::sync::atomic::AtomicUsize;
 
-    #[test]
-    fn startup_does_not_read_saved_transcripts() {
-        let data_dir = std::env::temp_dir().join(format!(
-            "monocode-startup-transcripts-{}-{}",
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "avenrail-{name}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
-        let path = data_dir.join("monocode.db");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn legacy_database_moves_with_its_sidecars() {
+        let dir = scratch_dir("legacy-db");
+        std::fs::write(dir.join("monocode.db"), b"main").unwrap();
+        std::fs::write(dir.join("monocode.db-wal"), b"wal").unwrap();
+        std::fs::write(dir.join("monocode.db-shm"), b"shm").unwrap();
+        migrate_legacy_database(&dir).unwrap();
+        assert_eq!(std::fs::read(dir.join("avenrail.db")).unwrap(), b"main");
+        assert_eq!(std::fs::read(dir.join("avenrail.db-wal")).unwrap(), b"wal");
+        assert_eq!(std::fs::read(dir.join("avenrail.db-shm")).unwrap(), b"shm");
+        assert!(!dir.join("monocode.db").exists());
+        assert!(!dir.join("monocode.db-wal").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn legacy_database_never_replaces_a_current_one() {
+        let dir = scratch_dir("legacy-db-keep");
+        std::fs::write(dir.join("monocode.db"), b"old").unwrap();
+        std::fs::write(dir.join("avenrail.db"), b"new").unwrap();
+        migrate_legacy_database(&dir).unwrap();
+        assert_eq!(std::fs::read(dir.join("avenrail.db")).unwrap(), b"new");
+        assert_eq!(std::fs::read(dir.join("monocode.db")).unwrap(), b"old");
+        let fresh = scratch_dir("legacy-db-none");
+        migrate_legacy_database(&fresh).unwrap();
+        assert!(!fresh.join("avenrail.db").exists());
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&fresh).ok();
+    }
+
+    #[test]
+    fn startup_does_not_read_saved_transcripts() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "avenrail-startup-transcripts-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = data_dir.join("avenrail.db");
         {
             let store = SessionStore::open(path.clone()).unwrap();
             let conn = store.lock_conn().unwrap();
@@ -3057,7 +3134,7 @@ mod tests {
     #[test]
     fn migrate_restores_the_covering_index_when_versions_already_recorded() {
         let path = std::env::temp_dir().join(format!(
-            "monocode-stale-index-{}-{}.db",
+            "avenrail-stale-index-{}-{}.db",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -3127,7 +3204,7 @@ mod tests {
     #[test]
     fn session_search_uses_a_query_only_read_connection() {
         let path = std::env::temp_dir().join(format!(
-            "monocode-session-read-conn-{}-{}.db",
+            "avenrail-session-read-conn-{}-{}.db",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

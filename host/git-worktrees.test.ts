@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 it.each([false, true])("applies generated worktree names only to retained sessions (deleted: %s)", async (deleted) => {
-  const cwd = mkdtempSync(join(tmpdir(), "monocode-host-names-"));
+  const cwd = mkdtempSync(join(tmpdir(), "avenrail-host-names-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd });
   git("init", "-q");
   git("checkout", "-q", "-b", "main");
@@ -85,7 +85,7 @@ it.each([false, true])("applies generated worktree names only to retained sessio
     const logged = vi.spyOn(console, "debug").mockImplementation(() => {});
     try {
       finishBranch("remote-naming");
-      await vi.waitFor(() => expect(logged).toHaveBeenCalledWith("[monocode] remote worktree branch", expect.any(Error)));
+      await vi.waitFor(() => expect(logged).toHaveBeenCalledWith("[avenrail] remote worktree branch", expect.any(Error)));
       expect((await hostWorktrees(cwd)).worktrees.find((item) => item.path === tree.path)?.branch).toBe("mc/12345678");
     } finally { logged.mockRestore(); }
     return;
@@ -94,14 +94,14 @@ it.each([false, true])("applies generated worktree names only to retained sessio
   await vi.waitFor(() => {
     expect(store.session(sessionId).session).toMatchObject({
       title: "codex · Fix remote naming",
-      branch: "mc/remote-naming",
+      branch: "av/remote-naming",
       worktreeCwd: tree.path,
     });
   });
   expect(
     (await hostWorktrees(cwd)).worktrees.find((item) => item.path === tree.path)
       ?.branch,
-  ).toBe("mc/remote-naming");
+  ).toBe("av/remote-naming");
   expect(title).toHaveBeenCalledTimes(1);
   expect(branch).toHaveBeenCalledTimes(1);
   engine.command({
@@ -119,7 +119,7 @@ it.each([false, true])("applies generated worktree names only to retained sessio
 });
 
 it("creates registered host worktrees and binds new sessions to the selected checkout", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "monocode-host-worktrees-"));
+  const cwd = mkdtempSync(join(tmpdir(), "avenrail-host-worktrees-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd });
   git("init", "-q");
   git("checkout", "-q", "-b", "main");

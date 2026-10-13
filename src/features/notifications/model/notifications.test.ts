@@ -9,7 +9,7 @@ import {
 } from "./notifications";
 import { newSession, type Session } from "../../sessions/model/session";
 
-const KEY = "monocode.notifications";
+const KEY = "avenrail.notifications";
 
 describe("pendingInputNotifications", () => {
   it("detects a second approval without an intervening idle render", () => {

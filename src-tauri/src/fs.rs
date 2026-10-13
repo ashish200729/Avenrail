@@ -1226,7 +1226,7 @@ pub enum GitHubStarStatus {
     Unavailable,
 }
 
-const MONOCODE_STAR_ENDPOINT: &str = "/user/starred/hardbeat920/monocode";
+const AVENRAIL_STAR_ENDPOINT: &str = "/user/starred/ashish200729/Avenrail";
 
 /// Whether the GitHub CLI is installed and has an active authenticated account.
 #[tauri::command]
@@ -1265,16 +1265,16 @@ fn git_github_status_for() -> GitHubStatus {
 
 /// Whether the active GitHub CLI account has starred the Avenrail repository.
 #[tauri::command]
-pub async fn github_monocode_star_status() -> Result<GitHubStarStatus, String> {
-    tauri::async_runtime::spawn_blocking(github_monocode_star_status_for)
+pub async fn github_avenrail_star_status() -> Result<GitHubStarStatus, String> {
+    tauri::async_runtime::spawn_blocking(github_avenrail_star_status_for)
         .await
         .map_err(|error| error.to_string())
 }
 
-fn github_monocode_star_status_for() -> GitHubStarStatus {
+fn github_avenrail_star_status_for() -> GitHubStarStatus {
     let result = gh_run(
         Path::new("."),
-        &["api", "--silent", MONOCODE_STAR_ENDPOINT],
+        &["api", "--silent", AVENRAIL_STAR_ENDPOINT],
         true,
     );
     github_star_status_from_result(result)
@@ -1290,11 +1290,11 @@ fn github_star_status_from_result(result: Result<String, String>) -> GitHubStarS
 
 /// Star the Avenrail repository for the active GitHub CLI account.
 #[tauri::command]
-pub async fn github_star_monocode() -> Result<(), String> {
+pub async fn github_star_avenrail() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(|| {
         gh_run(
             Path::new("."),
-            &["api", "--silent", "--method", "PUT", MONOCODE_STAR_ENDPOINT],
+            &["api", "--silent", "--method", "PUT", AVENRAIL_STAR_ENDPOINT],
             true,
         )
         .map(|_| ())
@@ -2667,7 +2667,7 @@ fn github_pr_head_filter(repo: &str, branch: &str) -> Option<String> {
 }
 
 fn git_github_repo_for(root: &Path) -> Result<String, String> {
-    let json = gh_checked(root, &["repo", "view", "--json", "nameWithOwner"])?;
+    let json = gh_repo_view(root, "nameWithOwner")?;
     #[derive(Deserialize)]
     struct View {
         #[serde(rename = "nameWithOwner")]
@@ -2682,7 +2682,7 @@ fn git_github_repo_for(root: &Path) -> Result<String, String> {
 }
 
 fn git_github_repositories_for(root: &Path) -> Result<Vec<String>, String> {
-    let json = gh_checked(root, &["repo", "view", "--json", "nameWithOwner,parent"])?;
+    let json = gh_repo_view(root, "nameWithOwner,parent")?;
     parse_github_repositories(&json)
 }
 
@@ -3119,7 +3119,7 @@ fn with_temp_markdown(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let path = std::env::temp_dir().join(format!("monocode-comment-{stamp}.md"));
+    let path = std::env::temp_dir().join(format!("avenrail-comment-{stamp}.md"));
     std::fs::write(&path, body).map_err(|error| error.to_string())?;
     let path_str = path.to_string_lossy().into_owned();
     let result = run(&path_str);
@@ -3862,7 +3862,7 @@ fn gh_resolved_remote(root: &Path) -> Option<String> {
 }
 
 fn gh_repo_view_url(root: &Path) -> Option<String> {
-    let text = gh_stdout(root, &["repo", "view", "--json", "url"])?;
+    let text = gh_repo_view(root, "url").ok()?;
     serde_json::from_str::<serde_json::Value>(&text)
         .ok()?
         .get("url")?
@@ -4085,6 +4085,19 @@ fn git_pr_create_for(root: &Path, input: &GitPrCreateInput) -> Result<String, St
     })
 }
 
+/// `gh repo view --json <fields>` for the project's own repository. Unlike the
+/// other subcommands, `repo view` ignores `GH_REPO`, so the slug is passed
+/// explicitly; with no GitHub remote to name, `gh` resolves it as before.
+fn gh_repo_view(root: &Path, fields: &str) -> Result<String, String> {
+    let slug = git_github_remote_repo(root);
+    let mut args = vec!["repo", "view"];
+    if let Some(slug) = slug.as_deref() {
+        args.push(slug);
+    }
+    args.extend(["--json", fields]);
+    gh_checked(root, &args)
+}
+
 fn gh_stdout(root: &Path, args: &[&str]) -> Option<String> {
     gh_run(root, args, false).ok()
 }
@@ -4103,6 +4116,13 @@ fn gh_run(root: &Path, args: &[&str], allow_empty: bool) -> Result<String, Strin
         .env("GH_PROMPT_DISABLED", "1")
         .env("GH_PAGER", "cat")
         .env("GIT_PAGER", "cat");
+    // `gh` ranks an `upstream` remote above `origin`, so in a fork clone it
+    // would act on the original repository. Pin it to the project's own repo.
+    if std::env::var_os("GH_REPO").is_none() {
+        if let Some(repo) = git_github_remote_repo(root) {
+            cmd.env("GH_REPO", repo);
+        }
+    }
     crate::harness::apply_gui_env(&mut cmd);
     crate::hide_window_console(&mut cmd);
     let output = cmd.output().map_err(|error| {
@@ -4132,6 +4152,53 @@ fn gh_run(root: &Path, args: &[&str], allow_empty: bool) -> Result<String, Strin
         format!("gh {} failed", args.join(" "))
     };
     Err(detail)
+}
+
+/// `owner/repo` for a GitHub remote URL (https, ssh or scp-style), else `None`.
+fn github_slug_from_remote_url(url: &str) -> Option<String> {
+    let trimmed = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let (authority, path) = match trimmed.split_once("://") {
+        Some((_, after)) => after.split_once('/')?,
+        None => trimmed.split_once(':')?,
+    };
+    let host = authority.rsplit('@').next()?.split(':').next()?;
+    if !host.eq_ignore_ascii_case("github.com") {
+        return None;
+    }
+    let (owner, name) = split_github_repo(path.trim_start_matches('/')).ok()?;
+    Some(format!("{owner}/{name}"))
+}
+
+/// The project's own GitHub repository from `(remote, url)` pairs: `origin`
+/// when it is on GitHub, otherwise the only remote. Several unrelated remotes
+/// are ambiguous, so `None` leaves the choice to `gh`.
+fn pick_github_repo(remotes: &[(String, String)]) -> Option<String> {
+    if let Some((_, url)) = remotes.iter().find(|(name, _)| name == "origin") {
+        return github_slug_from_remote_url(url);
+    }
+    match remotes {
+        [(_, url)] => github_slug_from_remote_url(url),
+        _ => None,
+    }
+}
+
+/// Own GitHub repository of the checkout at `root`, unless the user chose a
+/// default with `gh repo set-default` (`remote.<name>.gh-resolved`), which wins.
+fn git_github_remote_repo(root: &Path) -> Option<String> {
+    if gh_resolved_remote(root).is_some() {
+        return None;
+    }
+    let listed = git_stdout(root, &["remote", "-v"])?;
+    let mut remotes: Vec<(String, String)> = Vec::new();
+    for line in listed.lines() {
+        let mut parts = line.split_whitespace();
+        let (Some(name), Some(url), Some("(fetch)")) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        remotes.push((name.to_string(), url.to_string()));
+    }
+    pick_github_repo(&remotes)
 }
 
 pub(crate) fn resolve_repo_path(root: &Path, relative: &str) -> Result<String, String> {
@@ -6042,8 +6109,8 @@ mod tests {
     #[test]
     fn project_location_follows_a_sibling_rename() {
         let parent = tmp("project-location-rename");
-        let original = parent.0.join("monocode");
-        let renamed = parent.0.join("monocode-personal");
+        let original = parent.0.join("avenrail");
+        let renamed = parent.0.join("avenrail-personal");
         std::fs::create_dir(&original).unwrap();
 
         let first = resolve_project_location_sync(&path_to_js(&original), None)
@@ -7435,6 +7502,66 @@ mod tests {
     }
 
     #[test]
+    fn github_slug_reads_https_ssh_and_scp_remotes() {
+        for url in [
+            "https://github.com/ashish200729/Avenrail.git",
+            "https://user@github.com/ashish200729/Avenrail",
+            "git@github.com:ashish200729/Avenrail.git",
+            "ssh://git@github.com/ashish200729/Avenrail.git",
+            "ssh://git@github.com:22/ashish200729/Avenrail/",
+        ] {
+            assert_eq!(
+                github_slug_from_remote_url(url).as_deref(),
+                Some("ashish200729/Avenrail"),
+                "{url}"
+            );
+        }
+        assert_eq!(
+            github_slug_from_remote_url("https://gitlab.com/a/b.git"),
+            None
+        );
+        assert_eq!(github_slug_from_remote_url("/srv/git/local.git"), None);
+        assert_eq!(
+            github_slug_from_remote_url("https://github.com/only-owner"),
+            None
+        );
+    }
+
+    #[test]
+    fn pick_github_repo_prefers_origin_over_upstream() {
+        let remotes = vec![
+            (
+                "upstream".to_string(),
+                "https://github.com/hardbeat920/monocode.git".to_string(),
+            ),
+            (
+                "origin".to_string(),
+                "https://github.com/ashish200729/Avenrail.git".to_string(),
+            ),
+        ];
+        assert_eq!(
+            pick_github_repo(&remotes).as_deref(),
+            Some("ashish200729/Avenrail")
+        );
+    }
+
+    #[test]
+    fn pick_github_repo_uses_a_sole_remote_and_skips_ambiguous_ones() {
+        let one = vec![("fork".to_string(), "git@github.com:a/b.git".to_string())];
+        assert_eq!(pick_github_repo(&one).as_deref(), Some("a/b"));
+        let many = vec![
+            ("a".to_string(), "git@github.com:a/b.git".to_string()),
+            ("c".to_string(), "git@github.com:c/d.git".to_string()),
+        ];
+        assert_eq!(pick_github_repo(&many), None);
+        let off_github = vec![(
+            "origin".to_string(),
+            "https://gitlab.com/a/b.git".to_string(),
+        )];
+        assert_eq!(pick_github_repo(&off_github), None);
+    }
+
+    #[test]
     fn parse_github_repositories_includes_a_forks_parent() {
         let json = r#"{
             "nameWithOwner": "EricRasputin/monocode-eric",
@@ -7601,7 +7728,7 @@ mod tests {
             split_github_repo(" hardbeat920/monocode ").unwrap(),
             ("hardbeat920".into(), "monocode".into())
         );
-        assert!(split_github_repo("monocode").is_err());
+        assert!(split_github_repo("avenrail").is_err());
         assert!(split_github_repo("acme/web extra").is_err());
     }
 
@@ -8387,7 +8514,7 @@ mod tests {
         for args in [
             ["config", "commit.gpgsign", "true"],
             ["config", "gpg.format", "openpgp"],
-            ["config", "gpg.program", "/nonexistent/monocode-gpg"],
+            ["config", "gpg.program", "/nonexistent/avenrail-gpg"],
         ] {
             assert!(git(&dir.0, &args));
         }

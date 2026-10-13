@@ -119,7 +119,7 @@ describe("historyWithLiveSessions", () => {
     status: "active",
     allowedHarnesses: ["codex"],
     maxWorkers: 2,
-    cli: "monocode",
+    cli: "avenrail",
     continuations: 0,
     requests: {},
     tasks: ["worker-a", "worker-b"].map((id) => ({
@@ -269,17 +269,17 @@ describe("historyWithLiveSessions", () => {
   });
 
   it("stamps composer git onto a live session that is not persisted yet", () => {
-    const session = newSession("cursor", "/tmp/monocode");
+    const session = newSession("cursor", "/tmp/avenrail");
     session.blocks = [{ id: "u1", role: "user", text: "hello" }];
     session.busy = true;
 
-    const rows = historyWithLiveSessions([], [session], "/tmp/monocode", {
-      repo: "monocode",
+    const rows = historyWithLiveSessions([], [session], "/tmp/avenrail", {
+      repo: "avenrail",
       branch: "main",
     });
     expect(rows[0]).toMatchObject({
       id: session.id,
-      repo: "monocode",
+      repo: "avenrail",
       branch: "main",
     });
   });
@@ -288,7 +288,7 @@ describe("historyWithLiveSessions", () => {
     const history = [
       {
         ...summary("a1", "/tmp/agent-terminal"),
-        repo: "monocode",
+        repo: "avenrail",
         branch: "main",
       },
     ];
@@ -304,7 +304,7 @@ describe("historyWithLiveSessions", () => {
     );
     const live = rows.find((row) => row.id === session.id);
     expect(live).toMatchObject({
-      repo: "monocode",
+      repo: "avenrail",
       branch: "fix-gutter",
     });
   });
@@ -316,12 +316,12 @@ describe("historyWithLiveSessions", () => {
     session.branch = "feat/picker";
 
     const rows = historyWithLiveSessions([], [session], "/tmp/agent-terminal", {
-      repo: "monocode",
+      repo: "avenrail",
       branch: "main",
     });
     expect(rows[0]).toMatchObject({
       id: session.id,
-      repo: "monocode",
+      repo: "avenrail",
       branch: "feat/picker",
     });
   });

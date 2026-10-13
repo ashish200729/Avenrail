@@ -1,10 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
-import { appendReadyHandoff, buildDeterministicHandoff } from "../../sessions/model/handoff";
+import {
+  appendReadyHandoff,
+  buildDeterministicHandoff,
+} from "../../sessions/model/handoff";
 import { invokeWorkspace, notifyGitChanged } from "../../../platform/tauri/fs";
-import { isFilesystemTab, type FilePaneTab } from "../../workspace/model/layout";
+import {
+  isFilesystemTab,
+  type FilePaneTab,
+} from "../../workspace/model/layout";
 import { isEqualOrInside, pathKey } from "../../../shared/lib/paths";
 import { isBlankSession } from "../../projects/model/projectReturn";
-import { newSession, sessionWorkCwd, type Session } from "../../sessions/model/session";
+import {
+  newSession,
+  sessionWorkCwd,
+  type Session,
+} from "../../sessions/model/session";
 
 export type Worktree = {
   path: string;
@@ -39,10 +49,7 @@ export async function createWorktree(
   return tree;
 }
 
-export async function createOrchestrationWorktree(
-  cwd: string,
-  branch: string,
-) {
+export async function createOrchestrationWorktree(cwd: string, branch: string) {
   const tree = await invoke<Worktree>("git_orchestration_worktree_create", {
     cwd,
     branch,
@@ -72,20 +79,23 @@ export function temporaryWorktreeBranchName(
     .replace(/[^a-zA-Z0-9]/g, "")
     .slice(0, 8)
     .toLowerCase();
-  return `mc/${token || Date.now().toString(36)}`;
+  return `av/${token || Date.now().toString(36)}`;
 }
 
 export function orchestrationWorktreeBranchName(id: string): string {
-  const token = id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12).toLowerCase();
-  return `mc/orch-${token || Date.now().toString(36)}`;
+  const token = id
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 12)
+    .toLowerCase();
+  return `av/orch-${token || Date.now().toString(36)}`;
 }
 
 export function namedWorktreeBranch(fragment: string): string | null {
   const clean = fragment
     .trim()
-    .replace(/^(?:mc|monocode)\/+/, "")
+    .replace(/^(?:av|mc|monocode)\/+/, "")
     .replace(/^\/+|\/+$/g, "");
-  return clean ? `mc/${clean}` : null;
+  return clean ? `av/${clean}` : null;
 }
 
 export async function removeWorktree(
@@ -102,10 +112,7 @@ export async function removeWorktree(
   return result;
 }
 
-export async function removeOrchestrationWorktree(
-  cwd: string,
-  path: string,
-) {
+export async function removeOrchestrationWorktree(cwd: string, path: string) {
   const result = await invoke<{ sessionIds: string[]; projectCwd: string }>(
     "git_orchestration_worktree_remove",
     { cwd, path },
@@ -114,10 +121,7 @@ export async function removeOrchestrationWorktree(
   return result;
 }
 
-export async function removeOrchestrationBranch(
-  cwd: string,
-  branch: string,
-) {
+export async function removeOrchestrationBranch(cwd: string, branch: string) {
   await invoke<void>("git_orchestration_branch_remove", { cwd, branch });
   notifyGitChanged();
 }
@@ -166,11 +170,9 @@ export function worktreeSessionIds(
 export const NO_BRANCH_LABEL = "No branch selected";
 
 /** Keep the transcript and project identity while requiring a new working copy. */
-export function detachSessionWorktree<T extends { cwd: string; worktreeCwd?: string }>(
-  session: T,
-  projectCwd: string,
-  path: string,
-) {
+export function detachSessionWorktree<
+  T extends { cwd: string; worktreeCwd?: string },
+>(session: T, projectCwd: string, path: string) {
   return {
     ...session,
     cwd: isEqualOrInside(session.cwd, path) ? projectCwd : session.cwd,

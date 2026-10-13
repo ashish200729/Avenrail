@@ -11,7 +11,11 @@ type Props = {
   active?: boolean;
 };
 
-/** Pixel mascot standing in for the project's color dot. */
+/**
+ * Pixel mascot standing in for the project's color dot, seated on a soft chip
+ * of the project color so it reads as an app icon rather than a loose sprite.
+ * The chip adds 2px on every side of `className`'s size.
+ */
 export function ProjectMascot({
   project,
   color,
@@ -25,15 +29,18 @@ export function ProjectMascot({
       aria-hidden
       viewBox={`0 0 ${MASCOT_GRID} ${MASCOT_GRID}`}
       shapeRendering="crispEdges"
-      className={`${className} ${active ? "mascot-active" : ""}`}
+      className={`box-content rounded-[5px] p-0.5 ${className}`}
       fill="currentColor"
-      style={color ? { color } : undefined}
+      style={{
+        ...(color ? { color } : undefined),
+        backgroundColor: "color-mix(in srgb, currentColor 14%, transparent)",
+      }}
     >
       {active ? (
-        <>
+        <g className="mascot-active">
           <path className="mascot-rest" d={mascot.restPath} />
           <path className="mascot-talk" d={mascot.talkPath} />
-        </>
+        </g>
       ) : (
         <path d={mascot.restPath} />
       )}

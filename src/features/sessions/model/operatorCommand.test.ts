@@ -41,7 +41,7 @@ describe("Operator composer command", () => {
   it("keeps access for later turns when a submitted user turn enabled it", () => {
     expect(
       operatorEnabledInThread([
-        { id: "first", role: "user", text: "list notes", monocode: true },
+        { id: "first", role: "user", text: "list notes", avenrail: true },
         { id: "reply", role: "assistant", text: "Here are your notes." },
         { id: "followup", role: "user", text: "Start two sessions" },
       ]),
@@ -53,11 +53,18 @@ describe("Operator composer command", () => {
           role: "user",
           text: "list notes",
           draft: true,
-          monocode: true,
+          avenrail: true,
         },
         { id: "other", role: "user", text: "Explain /operator" },
       ]),
     ).toBe(false);
+    // Turns saved before the rename carry the old flag name.
+    expect(
+      operatorEnabledInThread([
+        { id: "old", role: "user", text: "list notes", monocode: true },
+        { id: "followup", role: "user", text: "Start two sessions" },
+      ]),
+    ).toBe(true);
     for (const alias of ["/mono", "/monocode"]) {
       const legacy = {
         id: "legacy",

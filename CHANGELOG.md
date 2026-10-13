@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Avenrail replaces the MonoCode name throughout the app, its data files, and its tooling: preference keys (`avenrail.*`), the database (`avenrail.db`), environment variables (`AVENRAIL_*`), the remote host (`avenrail-host`, installed under `~/.avenrail-host`), and worktree branches (`av/…`). Existing preferences and conversations are migrated on first launch, and earlier `mc/…` branches, saved turns, and `/mono` commands keep working. The bundle identifier `com.monocode.desktop` is unchanged. A remote host installed under the old name must be installed again.
+
 ### Fixed
 
+- Host file commands on nested projects resolve a path against the deepest project that contains it, so a project's own root can no longer be deleted as a subfolder of its parent project.
+
+- PRs & issues, pull-request status and PR creation use the project's own GitHub repository (`origin`) instead of an `upstream` remote, so a clone of a fork no longer shows the original repository's items. A repository chosen with `gh repo set-default` still wins, and a fork's parent repository is still listed when the project is a GitHub fork.
+- Choosing a session in the sidebar now leaves the Automations, PRs & issues, or Search page that was covering the workspace.
+- Star on GitHub stars Avenrail rather than the upstream repository, built-in skills are labelled Avenrail, and transcripts recognize app commands run through the `avenrail` executable.
 - A terminal no longer opens blank when its view remounts with the same ID, such as under React StrictMode in development or after moving a terminal between the dock and a file pane. The previous view's late cleanup used to kill the new shell and drop its output listener.
 
 ## [0.6.0] - 2026-09-30

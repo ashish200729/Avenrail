@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  tabCopy,
-  tabStripOverflow,
-  titleTabContextCloseIds,
-  titleTabClosable,
-  type Tab,
-} from "./TitleBar";
+import { tabCopy, type Tab } from "./TitleBar";
 
 function tab(overrides: Partial<Tab> = {}): Tab {
   return {
@@ -33,8 +27,7 @@ describe("tabCopy", () => {
     expect(focusedSession).toEqual({
       headline: "Add custom project logos",
       meta: "opencodeAdapter.ts",
-      tooltip:
-        "agent-terminal · Add custom project logos · opencodeAdapter.ts",
+      tooltip: "agent-terminal · Add custom project logos · opencodeAdapter.ts",
     });
 
     const focusedFile = tabCopy(
@@ -48,8 +41,7 @@ describe("tabCopy", () => {
     expect(focusedFile).toEqual({
       headline: "opencodeAdapter.ts",
       meta: "Add custom project logos",
-      tooltip:
-        "agent-terminal · Add custom project logos · opencodeAdapter.ts",
+      tooltip: "agent-terminal · Add custom project logos · opencodeAdapter.ts",
     });
   });
 
@@ -81,65 +73,5 @@ describe("tabCopy", () => {
     const copy = tabCopy(tab({ project: "agent-terminal" }));
     expect(copy.headline).toBe("New session");
     expect(copy.meta).toBe("");
-  });
-});
-
-describe("tabStripOverflow", () => {
-  it("hides both chevrons when the strip fits", () => {
-    expect(tabStripOverflow(0, 400, 400)).toEqual({ left: false, right: false });
-  });
-
-  it("shows only the right chevron at the start", () => {
-    expect(tabStripOverflow(0, 400, 800)).toEqual({ left: false, right: true });
-  });
-
-  it("shows both chevrons in the middle", () => {
-    expect(tabStripOverflow(200, 400, 800)).toEqual({ left: true, right: true });
-  });
-
-  it("shows only the left chevron at the end", () => {
-    expect(tabStripOverflow(400, 400, 800)).toEqual({ left: true, right: false });
-  });
-});
-
-describe("titleTabClosable", () => {
-  it("hides close on a sole blank tab", () => {
-    expect(titleTabClosable(tab({ blank: true }), 1)).toBe(false);
-  });
-
-  it("shows close on a sole tab once it has a conversation", () => {
-    expect(titleTabClosable(tab({ blank: false }), 1)).toBe(true);
-  });
-
-  it("allows a blank tab to be removed when another tab remains", () => {
-    expect(titleTabClosable(tab({ blank: true }), 2)).toBe(true);
-  });
-});
-
-describe("titleTabContextCloseIds", () => {
-  const tabs = [
-    tab({ id: "a" }),
-    tab({ id: "b" }),
-    tab({ id: "c" }),
-    tab({ id: "d" }),
-  ];
-
-  it("finds every tab except the context tab", () => {
-    expect(titleTabContextCloseIds(tabs, "b", "others")).toEqual([
-      "a",
-      "c",
-      "d",
-    ]);
-  });
-
-  it("finds tabs on either side in visual order", () => {
-    expect(titleTabContextCloseIds(tabs, "c", "left")).toEqual(["a", "b"]);
-    expect(titleTabContextCloseIds(tabs, "b", "right")).toEqual(["c", "d"]);
-  });
-
-  it("returns no ids for an edge or missing tab", () => {
-    expect(titleTabContextCloseIds(tabs, "a", "left")).toEqual([]);
-    expect(titleTabContextCloseIds(tabs, "d", "right")).toEqual([]);
-    expect(titleTabContextCloseIds(tabs, "missing", "others")).toEqual([]);
   });
 });

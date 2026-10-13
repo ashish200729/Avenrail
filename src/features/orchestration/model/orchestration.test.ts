@@ -23,7 +23,7 @@ function setup() {
     }),
     load: vi.fn(async (id: string) => saved.get(id) ?? null),
     enable: vi.fn(
-      async () => "/Applications/Avenrail.app/Contents/MacOS/monocode",
+      async () => "/Applications/Avenrail.app/Contents/MacOS/avenrail",
     ),
     disable: vi.fn(async () => {}),
     scopes: vi.fn(async (cwd: string, files: string[]) =>
@@ -48,7 +48,7 @@ function setup() {
         busy: false,
       });
       return {
-        scratchDir: `/private/var/folders/test/T/monocode-worker-${task.sessionId}`,
+        scratchDir: `/private/var/folders/test/T/avenrail-worker-${task.sessionId}`,
         workspace: {
           id: `checkout:/worktrees/${task.id}`,
           projectCwd: run.cwd,
@@ -120,7 +120,7 @@ describe("worker assignment prompts", () => {
   it("keeps the task text and wraps it in the assignment envelope", () => {
     const sent = workerTurnPrompt("Review the branch.", ["src/App.tsx"]);
     expect(sent.startsWith("Review the branch.")).toBe(true);
-    expect(sent).toContain("<monocode_assignment>");
+    expect(sent).toContain("<avenrail_assignment>");
     expect(sent).toContain("src/App.tsx");
     expect(sent).toContain("override any contradictory wording");
     expect(sent).toContain("stage, commit, push");
@@ -243,10 +243,10 @@ describe("local orchestration", () => {
       .mocked(f.host.submit)
       .mock.calls.find(
         ([id, prompt]) =>
-          id !== "lead" && String(prompt).includes("<monocode_assignment>"),
+          id !== "lead" && String(prompt).includes("<avenrail_assignment>"),
       )?.[1];
     expect(workerPrompt).toContain("Define the types");
-    expect(workerPrompt).toContain("<monocode_assignment>");
+    expect(workerPrompt).toContain("<avenrail_assignment>");
     expect(
       vi.mocked(f.host.submit).mock.calls.find(([id]) => id === "lead")?.[1],
     ).toContain("do not delegate duplicates");
@@ -1215,14 +1215,14 @@ describe("local orchestration", () => {
   });
   it("quotes the control path only when the shell needs it", () => {
     expect(
-      shellPath("/Applications/Avenrail.app/Contents/MacOS/monocode"),
-    ).toBe("/Applications/Avenrail.app/Contents/MacOS/monocode");
+      shellPath("/Applications/Avenrail.app/Contents/MacOS/avenrail"),
+    ).toBe("/Applications/Avenrail.app/Contents/MacOS/avenrail");
     expect(shellPath("/Users/a b/Avenrail")).toBe("'/Users/a b/Avenrail'");
-    expect(shellPath("C:/Program Files/Avenrail/monocode.exe")).toBe(
-      '"C:/Program Files/Avenrail/monocode.exe"',
+    expect(shellPath("C:/Program Files/Avenrail/avenrail.exe")).toBe(
+      '"C:/Program Files/Avenrail/avenrail.exe"',
     );
-    expect(shellPath("C:\\Tools\\monocode.exe")).toBe(
-      "C:\\Tools\\monocode.exe",
+    expect(shellPath("C:\\Tools\\avenrail.exe")).toBe(
+      "C:\\Tools\\avenrail.exe",
     );
     // A backslash escapes in a POSIX shell, so bare would rewrite the path.
     expect(shellPath("/Users/a\\b/Avenrail")).toBe("'/Users/a\\b/Avenrail'");

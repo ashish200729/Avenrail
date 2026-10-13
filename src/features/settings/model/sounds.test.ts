@@ -21,7 +21,7 @@ import {
 } from "./sounds";
 import { updateNotificationPreferences } from "../../notifications/model/notificationPreferences";
 
-const KEY = "monocode.sounds";
+const KEY = "avenrail.sounds";
 
 function mockLocalStorage() {
   const data = new Map<string, string>();

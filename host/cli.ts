@@ -47,7 +47,7 @@ const option = (name: string, fallback: string): string => {
   return args[i + 1];
 };
 const directory = resolve(
-  option("data-dir", join(homedir(), ".monocode-host")),
+  option("data-dir", join(homedir(), ".avenrail-host")),
 );
 const port = Number(option("port", "3774"));
 const statePath = join(directory, "running.json");

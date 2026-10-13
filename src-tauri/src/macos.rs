@@ -54,7 +54,7 @@ pub const BLUR_MIN: u8 = 1;
 pub const BLUR_MAX: u8 = 64;
 pub const BLUR_DEFAULT: u8 = 24;
 
-const GLASS_BACKING_ID: &str = "monocode.webview-glass-backing";
+const GLASS_BACKING_ID: &str = "avenrail.webview-glass-backing";
 
 const RTLD_DEFAULT: *mut c_void = -2isize as *mut c_void;
 
@@ -531,7 +531,7 @@ pub(crate) fn install_dock_menu(app: &AppHandle) {
 #[cfg(debug_assertions)]
 pub(crate) fn ensure_dev_bundle() {
     if let Err(err) = relaunch_from_dev_bundle() {
-        eprintln!("monocode: macos dev bundle: {err}");
+        eprintln!("avenrail: macos dev bundle: {err}");
     }
 }
 
@@ -611,7 +611,7 @@ fn relaunch_from_dev_bundle() -> Result<(), String> {
     perms.set_mode(0o755);
     std::fs::set_permissions(&bundled, perms).map_err(|e| e.to_string())?;
 
-    // The linker's ad-hoc signature carries a `monocode-<hash>` identifier.
+    // The linker's ad-hoc signature carries a `avenrail-<hash>` identifier.
     // UNUserNotificationCenter refuses authorization, without prompting,
     // unless the signing identifier matches CFBundleIdentifier.
     let signed = Command::new("/usr/bin/codesign")
@@ -621,7 +621,7 @@ fn relaunch_from_dev_bundle() -> Result<(), String> {
         .map(|status| status.success())
         .unwrap_or(false);
     if !signed {
-        eprintln!("monocode: macos dev bundle: codesign failed; notifications stay off");
+        eprintln!("avenrail: macos dev bundle: codesign failed; notifications stay off");
     }
 
     let err = Command::new(&bundled)
@@ -649,7 +649,7 @@ fn write_dev_bundle_icons(app: &Path, app_name: &str) -> Result<(), String> {
 #[cfg(debug_assertions)]
 const DEV_BUNDLE_DEFAULT_NAME: &str = "Avenrail";
 #[cfg(debug_assertions)]
-const DEV_BUNDLE_NAME_ENV: &str = "MONOCODE_DEV_APP_NAME";
+const DEV_BUNDLE_NAME_ENV: &str = "AVENRAIL_DEV_APP_NAME";
 #[cfg(debug_assertions)]
 const DEV_BUNDLE_ID: &str = "com.monocode.desktop";
 #[cfg(debug_assertions)]
@@ -749,11 +749,11 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "monocode-macos-tests-{}-{nonce}",
+            "avenrail-macos-tests-{}-{nonce}",
             std::process::id()
         ));
         let app = root.join(app_name);
-        let exe = app.join("Contents/MacOS/monocode");
+        let exe = app.join("Contents/MacOS/avenrail");
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::write(app.join("Contents/Info.plist"), b"plist").unwrap();
         (root, exe)

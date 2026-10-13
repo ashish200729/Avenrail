@@ -239,11 +239,11 @@ pub enum HostPlatform {
     Windows,
 }
 
-const PLATFORM_PROBE: &[&str] = &["echo", "MONOCODE_PLATFORM", "$env:OS", "%OS%", "$OS"];
+const PLATFORM_PROBE: &[&str] = &["echo", "AVENRAIL_PLATFORM", "$env:OS", "%OS%", "$OS"];
 
 fn parse_platform(output: &str) -> Result<HostPlatform, String> {
     let marker = output
-        .rsplit_once("MONOCODE_PLATFORM")
+        .rsplit_once("AVENRAIL_PLATFORM")
         .ok_or("Could not identify the remote shell. Use cmd.exe, PowerShell, or a Unix shell.")?
         .1;
     Ok(
@@ -416,18 +416,18 @@ pub fn upgrade_script(platform: HostPlatform, port: u16) -> String {
     let script = bootstrap_script(platform);
     match platform {
         HostPlatform::Unix => {
-            format!("MONOCODE_HOST_FORCE_UPGRADE=1\nMONOCODE_HOST_PORT={port}\n{script}")
+            format!("AVENRAIL_HOST_FORCE_UPGRADE=1\nAVENRAIL_HOST_PORT={port}\n{script}")
         }
         HostPlatform::Windows => format!(
-            "$env:MONOCODE_HOST_FORCE_UPGRADE = '1'\n$env:MONOCODE_HOST_PORT = '{port}'\n{script}"
+            "$env:AVENRAIL_HOST_FORCE_UPGRADE = '1'\n$env:AVENRAIL_HOST_PORT = '{port}'\n{script}"
         ),
     }
 }
 
 pub fn pairing_script(platform: HostPlatform, name: &str) -> String {
     match platform {
-        HostPlatform::Unix => format!("set -eu\n\"$HOME/.monocode-host/bin/monocode-host\" pair --name {} --json\n", shell_quote(name)),
-        HostPlatform::Windows => format!("$ErrorActionPreference = 'Stop'\n$base = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.monocode-host'\n$runtime = [IO.File]::ReadAllText((Join-Path $base 'runtime-path')).Trim()\n& (Join-Path $runtime 'node.exe') (Join-Path $runtime 'host.mjs') pair --name {} --json\nif ($LASTEXITCODE -ne 0) {{ throw 'Host pairing failed.' }}\n", powershell_quote(name)),
+        HostPlatform::Unix => format!("set -eu\n\"$HOME/.avenrail-host/bin/avenrail-host\" pair --name {} --json\n", shell_quote(name)),
+        HostPlatform::Windows => format!("$ErrorActionPreference = 'Stop'\n$base = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.avenrail-host'\n$runtime = [IO.File]::ReadAllText((Join-Path $base 'runtime-path')).Trim()\n& (Join-Path $runtime 'node.exe') (Join-Path $runtime 'host.mjs') pair --name {} --json\nif ($LASTEXITCODE -ne 0) {{ throw 'Host pairing failed.' }}\n", powershell_quote(name)),
     }
 }
 
@@ -703,9 +703,9 @@ mod tests {
     fn loopback_transport_preserves_host_and_reconnects() {
         let required = |key| std::env::var(key).expect("Run scripts/test-remote-ssh.py");
         let target = SshTarget {
-            target: required("MONOCODE_TEST_SSH_TARGET"),
-            port: Some(required("MONOCODE_TEST_SSH_PORT").parse().unwrap()),
-            remote_port: required("MONOCODE_TEST_HOST_PORT").parse().unwrap(),
+            target: required("AVENRAIL_TEST_SSH_TARGET"),
+            port: Some(required("AVENRAIL_TEST_SSH_PORT").parse().unwrap()),
+            remote_port: required("AVENRAIL_TEST_HOST_PORT").parse().unwrap(),
         };
         let make_command = || {
             let mut command = command(&target, false);
@@ -713,13 +713,13 @@ mod tests {
                 "-F",
                 "/dev/null",
                 "-i",
-                &required("MONOCODE_TEST_SSH_KEY"),
+                &required("AVENRAIL_TEST_SSH_KEY"),
                 "-o",
                 "IdentitiesOnly=yes",
                 "-o",
                 &format!(
                     "UserKnownHostsFile={}",
-                    required("MONOCODE_TEST_KNOWN_HOSTS")
+                    required("AVENRAIL_TEST_KNOWN_HOSTS")
                 ),
             ]);
             command
@@ -745,13 +745,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.trim(), "remote-script-ok");
-        let environment = required("MONOCODE_TEST_ENVIRONMENT");
+        let environment = required("AVENRAIL_TEST_ENVIRONMENT");
         for _ in 0..2 {
             let tunnel = Tunnel::start_with_command(&target, None, None, make_command()).unwrap();
             let response = ureq::post(&format!("http://127.0.0.1:{}/rpc", tunnel.port))
                 .set(
                     "Authorization",
-                    &format!("Bearer {}", required("MONOCODE_TEST_TOKEN")),
+                    &format!("Bearer {}", required("AVENRAIL_TEST_TOKEN")),
                 )
                 .send_string(r#"{"version":1,"method":"environment.describe"}"#)
                 .unwrap();
@@ -810,24 +810,24 @@ mod tests {
         assert!(script.contains("\"$FORCE_UPGRADE\" = 1"));
         assert!(script.contains("service uninstall"));
         assert!(
-            upgrade_script(HostPlatform::Unix, 3774).starts_with("MONOCODE_HOST_FORCE_UPGRADE=1")
+            upgrade_script(HostPlatform::Unix, 3774).starts_with("AVENRAIL_HOST_FORCE_UPGRADE=1")
         );
         assert!(!upgrade_script(HostPlatform::Unix, 3774).contains('\r'));
         assert!(upgrade_script(HostPlatform::Windows, 3774)
-            .starts_with("$env:MONOCODE_HOST_FORCE_UPGRADE = '1'"));
+            .starts_with("$env:AVENRAIL_HOST_FORCE_UPGRADE = '1'"));
     }
     #[test]
     fn remote_platform_probe_handles_cmd_powershell_and_unix() {
         assert_eq!(
-            parse_platform("MONOCODE_PLATFORM $env:OS Windows_NT $OS\r\n").unwrap(),
+            parse_platform("AVENRAIL_PLATFORM $env:OS Windows_NT $OS\r\n").unwrap(),
             HostPlatform::Windows
         );
         assert_eq!(
-            parse_platform("MONOCODE_PLATFORM\r\nWindows_NT\r\n%OS%\r\n").unwrap(),
+            parse_platform("AVENRAIL_PLATFORM\r\nWindows_NT\r\n%OS%\r\n").unwrap(),
             HostPlatform::Windows
         );
         assert_eq!(
-            parse_platform("MONOCODE_PLATFORM :OS %OS%\n").unwrap(),
+            parse_platform("AVENRAIL_PLATFORM :OS %OS%\n").unwrap(),
             HostPlatform::Unix
         );
         assert!(parse_platform("unrecognized shell").is_err());

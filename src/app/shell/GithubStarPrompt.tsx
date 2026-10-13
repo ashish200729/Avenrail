@@ -1,13 +1,13 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useSyncExternalStore } from "react";
 import {
-  githubMonocodeStarStatus,
-  starMonocodeOnGithub,
+  githubAvenrailStarStatus,
+  starAvenrailOnGithub,
 } from "../../features/inbox/model/githubTasks";
 import { Loader, Star, X } from "../../shared/ui/icons";
 
-const MONOCODE_GITHUB_URL = "https://github.com/ashish200729/Avenrail";
-const DISMISSED_STORAGE_KEY = "monocode.githubStarPrompt.dismissed.v1";
+const AVENRAIL_GITHUB_URL = "https://github.com/ashish200729/Avenrail";
+const DISMISSED_STORAGE_KEY = "avenrail.githubStarPrompt.dismissed.v1";
 
 type PromptSnapshot = "loading" | "visible" | "starring" | "hidden";
 
@@ -58,7 +58,7 @@ function checkStarStatus(force = false): Promise<void> {
   if (!force && promptSnapshot !== "loading") return Promise.resolve();
 
   const initial = promptSnapshot === "loading";
-  checkRequest = githubMonocodeStarStatus()
+  checkRequest = githubAvenrailStarStatus()
     .then((status) => {
       if (status === "starred") setPromptSnapshot("hidden");
       else if (status === "notStarred") setPromptSnapshot("visible");
@@ -76,11 +76,11 @@ function checkStarStatus(force = false): Promise<void> {
 function starFromPrompt(): Promise<void> {
   if (starRequest) return starRequest;
   setPromptSnapshot("starring");
-  starRequest = starMonocodeOnGithub()
+  starRequest = starAvenrailOnGithub()
     .then(() => setPromptSnapshot("hidden"))
     .catch(async () => {
       setPromptSnapshot("visible");
-      await openUrl(MONOCODE_GITHUB_URL).catch(() => undefined);
+      await openUrl(AVENRAIL_GITHUB_URL).catch(() => undefined);
     })
     .finally(() => {
       starRequest = null;

@@ -8,11 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { isLocalProject } from "../../projects/model/recents";
-import {
-  isValidSkillName,
-  slugSkillName,
-  type Skill,
-} from "../model/skills";
+import { isValidSkillName, slugSkillName, type Skill } from "../model/skills";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 
 type Props = {
@@ -169,14 +165,10 @@ function SkillList({
             onClick={() => onPick(skill)}
             className={`flex w-full rounded-md px-2 text-left ${
               compact ? "h-8 items-center" : "flex-col gap-0.5 py-1.5"
-            } ${
-              highlighted ? "bg-content/10 text-content" : "text-content"
-            }`}
+            } ${highlighted ? "bg-content/10 text-content" : "text-content"}`}
           >
             <span className="flex min-w-0 w-full items-baseline gap-2">
-              <span className="truncate text-[13px]">
-                /{skill.invocation}
-              </span>
+              <span className="truncate text-[13px]">/{skill.invocation}</span>
               <span className="shrink-0 text-[10px] uppercase tracking-wide text-content/40">
                 {scopeLabel(skill)}
               </span>
@@ -186,9 +178,14 @@ function SkillList({
                 {skill.description}
               </span>
             ) : null}
-            {!compact && skill.kind === "native" && (skill.inputHint || skill.subcommands?.length) ? (
+            {!compact &&
+            skill.kind === "native" &&
+            (skill.inputHint || skill.subcommands?.length) ? (
               <span className="line-clamp-2 text-[11px] text-content/40">
-                {skill.inputHint || skill.subcommands?.map((sub) => sub.usage || sub.name).join(" · ")}
+                {skill.inputHint ||
+                  skill.subcommands
+                    ?.map((sub) => sub.usage || sub.name)
+                    .join(" · ")}
               </span>
             ) : null}
           </button>
@@ -346,8 +343,9 @@ function scopeLabel(skill: Skill): string {
   if (skill.kind === "native") {
     return skill.origin ? `${skill.source} · ${skill.origin}` : skill.source;
   }
-  if (skill.kind === "builtin") return "monocode";
+  if (skill.kind === "builtin") return "Avenrail";
   if (skill.scope === "user") return "personal";
-  if (skill.source !== "agents" && skill.source !== "monocode") return skill.source;
+  if (skill.source !== "agents" && skill.source !== "avenrail")
+    return skill.source;
   return "project";
 }

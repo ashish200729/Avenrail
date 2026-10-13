@@ -294,7 +294,6 @@ import {
   loadFormatOnSave,
   loadLiveAgentsEnabled,
   loadModelControls,
-  loadNotesEnabled,
   loadKeybindingOverrides,
   loadQuickComposerEnabled,
   loadQuickComposerShortcut,
@@ -309,7 +308,6 @@ import {
   saveFormatOnSave,
   saveLiveAgentsEnabled,
   saveModelControls,
-  saveNotesEnabled,
   saveKeybindingOverride,
   validateKeybindingShortcut,
   saveQuickComposerEnabled,
@@ -721,7 +719,6 @@ function GeneralPage({
   );
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermission>(cachedNotificationPermission);
-  const [notesEnabled, setNotesEnabled] = useState(loadNotesEnabled);
   const [liveAgentsEnabled, setLiveAgentsEnabled] = useState(
     loadLiveAgentsEnabled,
   );
@@ -759,11 +756,6 @@ function GeneralPage({
     setNotificationsEnabled(next);
     if (!next) return;
     void requestNotificationPermission().then(setNotificationPermission);
-  };
-
-  const onNotesEnabled = (next: boolean) => {
-    saveNotesEnabled(next);
-    setNotesEnabled(next);
   };
 
   const onQuickComposerEnabled = (next: boolean) => {
@@ -806,7 +798,7 @@ function GeneralPage({
         <Row
           id="sounds"
           label="Sounds"
-          description="Short cues for project activity, finished turns, and available updates. Choose project notification categories in Inbox settings. Switches and Copy on a finished turn also play."
+          description="Short cues for project activity, finished turns, and available updates. Choose project notification categories in PRs & issues settings. Switches and Copy on a finished turn also play."
         >
           <Toggle
             label="Sounds"
@@ -864,13 +856,6 @@ function GeneralPage({
             on={tabAnimationsEnabled}
             onChange={onTabAnimationsEnabled}
           />
-        </Row>
-        <Row
-          id="notes"
-          label="Notes"
-          description="A global markdown notebook on the project rail. Save a finished turn from the transcript, then mention it later with @note or add it to chat."
-        >
-          <Toggle label="Notes" on={notesEnabled} onChange={onNotesEnabled} />
         </Row>
         {IS_MAC && (
           <Row
@@ -980,7 +965,6 @@ function ChatPage() {
     saveComposerRunner(next);
     setComposerRunner(next);
   };
-
 
   return (
     <>
@@ -1237,7 +1221,7 @@ function GithubSettings() {
   }, [checkStatus]);
 
   const description = status?.connected
-    ? "GitHub CLI is installed and authenticated. Avenrail uses it for GitHub inbox items."
+    ? "GitHub CLI is installed and authenticated. Avenrail uses it for GitHub issues and pull requests in PRs & issues."
     : status?.installed
       ? "Run gh auth login in a terminal, complete the sign-in flow, then check again."
       : "Install GitHub CLI from cli.github.com, run gh auth login in a terminal, then check again.";
@@ -1652,7 +1636,7 @@ function LinearSettings() {
         <div className="border-b border-content/5 px-4 py-3.5 last:border-b-0">
           <div className="text-[13px] font-medium text-content">Teams</div>
           <p className="mt-1 text-[12px] leading-relaxed text-content/45">
-            Unchecked teams stay out of the inbox.
+            Unchecked teams stay out of PRs & issues.
           </p>
           <div className="-mx-2 mt-2 flex flex-col gap-0.5">
             {teams.map((team) => {
@@ -2708,7 +2692,10 @@ function binaryInspectionError(
   inspection: HarnessBinaryInspection,
 ): string | null {
   if (inspection.error) return inspection.error;
-  if (provider === "codex" && !/^codex-cli\s+\d+\.\d+\.\d+/.test(inspection.version ?? "")) {
+  if (
+    provider === "codex" &&
+    !/^codex-cli\s+\d+\.\d+\.\d+/.test(inspection.version ?? "")
+  ) {
     return "Codex CLI returned an invalid version.";
   }
   if (provider === "opencode") {
@@ -2842,7 +2829,9 @@ function ProviderBinaryControl({
           setEditing(false);
         }}
         className={`grid size-6 place-items-center rounded hover:bg-content/10 focus-visible:outline-2 focus-visible:outline-accent ${
-          restartRequired ? "text-amber-300" : "text-content/35 hover:text-content"
+          restartRequired
+            ? "text-amber-300"
+            : "text-content/35 hover:text-content"
         }`}
       >
         <FolderOpen className="size-3.5" strokeWidth={1.75} />
@@ -2919,7 +2908,8 @@ function ProviderBinaryControl({
                 className="mt-1.5 h-8 w-full rounded-md border border-content/10 bg-content/[0.04] px-2 font-mono text-[11px] text-content outline-none placeholder:font-sans placeholder:text-content/35 focus:border-accent/45 disabled:opacity-50"
               />
               <p className="mt-1.5 text-[10px] text-content/40">
-                Enter the absolute path to the CLI executable. Changes apply after restarting Avenrail.
+                Enter the absolute path to the CLI executable. Changes apply
+                after restarting Avenrail.
               </p>
               {error ? (
                 <span
@@ -2958,31 +2948,33 @@ function ProviderBinaryControl({
               <div className="mt-2 rounded-md border border-content/10 bg-content/[0.03] px-2.5 py-2">
                 <span className="block max-h-12 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[10px] text-content/65">
                   {inspection?.path ??
-                    (error ? "CLI could not be resolved" : "Checking the selected CLI…")}
+                    (error
+                      ? "CLI could not be resolved"
+                      : "Checking the selected CLI…")}
                 </span>
                 <span className="mt-1 block max-h-10 overflow-y-auto whitespace-pre-wrap break-words text-[10px] text-content/40">
                   {inspection?.version ??
                     (error ? "Retry to check this CLI" : "Checking version…")}
                 </span>
               </div>
-               {error ? (
-                 <span
-                   role="alert"
-                   title={error}
-                   className="mt-1.5 block max-h-20 overflow-y-auto whitespace-pre-wrap break-words text-[10px] leading-4 text-red-400"
-                 >
-                   {error}
-                 </span>
-               ) : null}
-               {revealError ? (
-                 <span
-                   role="alert"
-                   className="mt-1.5 block max-h-20 overflow-y-auto whitespace-pre-wrap break-words text-[10px] leading-4 text-red-400"
-                 >
-                   Could not open the CLI location: {revealError}
-                 </span>
-               ) : null}
-               <div className="mt-3 flex justify-end gap-2">
+              {error ? (
+                <span
+                  role="alert"
+                  title={error}
+                  className="mt-1.5 block max-h-20 overflow-y-auto whitespace-pre-wrap break-words text-[10px] leading-4 text-red-400"
+                >
+                  {error}
+                </span>
+              ) : null}
+              {revealError ? (
+                <span
+                  role="alert"
+                  className="mt-1.5 block max-h-20 overflow-y-auto whitespace-pre-wrap break-words text-[10px] leading-4 text-red-400"
+                >
+                  Could not open the CLI location: {revealError}
+                </span>
+              ) : null}
+              <div className="mt-3 flex justify-end gap-2">
                 {error ? (
                   <SecondaryButton
                     disabled={working}
@@ -3004,7 +2996,9 @@ function ProviderBinaryControl({
                     if (inspection) {
                       void revealPath(inspection.path).catch((cause) => {
                         setRevealError(
-                          cause instanceof Error ? cause.message : String(cause),
+                          cause instanceof Error
+                            ? cause.message
+                            : String(cause),
                         );
                       });
                     }

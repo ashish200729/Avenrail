@@ -493,9 +493,9 @@ describe("sidebar session IDs", () => {
     await act(async () => copyHarnessId.click());
     expect(copyText).toHaveBeenNthCalledWith(1, "harness-session-2");
 
-    const monocodeMenu = openCopyIdMenu("session-2");
+    const avenrailMenu = openCopyIdMenu("session-2");
     const copyAvenrailId = Array.from(
-      monocodeMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+      avenrailMenu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
     ).find((item) => item.textContent === "Avenrail session ID")!;
     expect(copyAvenrailId.disabled).toBe(false);
     await act(async () => copyAvenrailId.click());
@@ -688,7 +688,7 @@ describe("sidebar reorder affordances", () => {
       },
     ];
     localStorage.setItem(
-      "monocode.sessionFolders",
+      "avenrail.sessionFolders",
       JSON.stringify({
         "/workspace/project": [
           {
@@ -754,7 +754,7 @@ describe("sidebar pinned sessions", () => {
     expect(group.querySelector('[data-session-card="session-1"]')).toBeNull();
     expect(
       JSON.parse(
-        localStorage.getItem("monocode.pinnedSessionsCollapsed") ?? "{}",
+        localStorage.getItem("avenrail.pinnedSessionsCollapsed") ?? "{}",
       ),
     ).toEqual({ "/workspace/project": true });
   });
@@ -912,7 +912,7 @@ describe("sidebar orchestration card", () => {
       ).toBe("true");
       props.approvalSessionIds = new Set([lead.id]);
       act(() => render());
-      expect(card().className).toContain("border-dashed");
+      expect(card().className).toContain("border-amber-500/25");
       expect(card().textContent).toContain("Needs input");
     },
   );
@@ -1045,6 +1045,33 @@ describe("sidebar automation card", () => {
     expect(
       card().querySelector("[data-session-select] [data-automation-icon]"),
     ).toBeNull();
+  });
+});
+
+describe("sidebar session badge", () => {
+  const badge = () => card().querySelector<HTMLElement>("[data-session-badge]");
+
+  it("seats the provider mark in a tile that carries the session state", () => {
+    props.busySessionIds = new Set();
+    props.unseenFinishedIds = new Set();
+    props.approvalSessionIds = new Set();
+    act(() => render());
+    expect(badge()?.getAttribute("data-session-badge")).toBe("idle");
+    expect(badge()?.querySelector("img, svg")).not.toBeNull();
+
+    props.busySessionIds = new Set(["session-1"]);
+    act(() => render());
+    expect(badge()?.getAttribute("data-session-badge")).toBe("working");
+    expect(card().textContent).toContain("Working");
+
+    props.busySessionIds = new Set();
+    props.unseenFinishedIds = new Set(["session-1"]);
+    act(() => render());
+    expect(badge()?.getAttribute("data-session-badge")).toBe("done");
+
+    props.approvalSessionIds = new Set(["session-1"]);
+    act(() => render());
+    expect(badge()?.getAttribute("data-session-badge")).toBe("approval");
   });
 });
 
@@ -1399,8 +1426,7 @@ describe("collapsed rail Inbox actions", () => {
       "Expand projects",
       "Switch project, current project project",
       "Search",
-      "Inbox",
-      "Notes",
+      "PRs & issues",
       "Automations",
       "Settings",
     ]);
@@ -1413,7 +1439,9 @@ describe("collapsed rail Inbox actions", () => {
     ).toHaveLength(0);
     expect(props.onTabChange).not.toHaveBeenCalled();
     expect(
-      container.querySelector('button[aria-label="Inbox"]')?.closest("nav"),
+      container
+        .querySelector('button[aria-label="PRs & issues"]')
+        ?.closest("nav"),
     ).toBe(rail);
     const projectPicker = rail.querySelector<HTMLButtonElement>(
       'button[aria-label^="Switch project"]',
@@ -1654,7 +1682,7 @@ describe("collapsed rail Inbox actions", () => {
     await act(async () => render());
 
     const inbox = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Inbox"]',
+      'button[aria-label="PRs & issues"]',
     )!;
     expect(inbox.getAttribute("aria-pressed")).toBe("true");
     act(() => inbox.click());
@@ -1665,7 +1693,7 @@ describe("collapsed rail Inbox actions", () => {
     act(() => render());
     act(() =>
       container
-        .querySelector<HTMLButtonElement>('button[aria-label="Inbox"]')!
+        .querySelector<HTMLButtonElement>('button[aria-label="PRs & issues"]')!
         .click(),
     );
     expect(props.onOpenInbox).toHaveBeenCalledOnce();
@@ -1682,7 +1710,7 @@ describe("collapsed rail Inbox actions", () => {
       props.recents = [{ path: "/workspace/other", openedAt: 1 }];
       await act(async () => render());
       const inbox = container.querySelector<HTMLButtonElement>(
-        'button[aria-label="Inbox"]',
+        'button[aria-label="PRs & issues"]',
       )!;
       expect(inbox).not.toBeNull();
       await act(async () => {
@@ -1703,7 +1731,7 @@ describe("collapsed rail Inbox actions", () => {
         );
       });
       const menu = document.querySelector(
-        '[role="menu"][aria-label="Inbox actions"]',
+        '[role="menu"][aria-label="PRs & issues actions"]',
       );
       expect(menu).not.toBeNull();
       expect(menu!.textContent).toContain("Mark all as read");
@@ -1720,7 +1748,9 @@ describe("collapsed rail Inbox actions", () => {
       expect(props.onOpenInbox).not.toHaveBeenCalled();
       expect(document.activeElement).toBe(inbox);
       expect(
-        document.querySelector('[role="menu"][aria-label="Inbox actions"]'),
+        document.querySelector(
+          '[role="menu"][aria-label="PRs & issues actions"]',
+        ),
       ).toBeNull();
     },
   );

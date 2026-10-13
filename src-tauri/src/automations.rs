@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::session_store::{now_millis, validate_id, SessionStore};
 
-pub(crate) const CHANGED: &str = "monocode:automations-changed";
+pub(crate) const CHANGED: &str = "avenrail:automations-changed";
 
 const MAX_NAME: usize = 200;
 const MAX_PROMPT: usize = 1_000_000;
@@ -787,7 +787,7 @@ pub fn automation_runs_recover(
         {
             run.status = "failed".into();
             run.completed_at = Some(now);
-            run.error = Some("The Inbox event prompt was not available after restart.".into());
+            run.error = Some("The event prompt was not available after restart.".into());
             apply_run_summary(&mut automation, &run);
             write_run(&tx, &run)?;
             write_automation(&tx, &automation)?;

@@ -5,7 +5,9 @@ import * as appearance from "./appearance";
 
 const platform = vi.hoisted(() => ({ isWindows: true }));
 vi.mock("../../../platform/tauri/platform", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../platform/tauri/platform")>()),
+  ...(await importOriginal<
+    typeof import("../../../platform/tauri/platform")
+  >()),
   get IS_WIN() {
     return platform.isWindows;
   },
@@ -39,81 +41,74 @@ afterEach(() => {
 
 describe.each([
   [
-    "monocode.tabAnimationsEnabled",
+    "avenrail.tabAnimationsEnabled",
     settings.loadTabAnimationsEnabled,
     settings.saveTabAnimationsEnabled,
     false,
     undefined,
   ],
   [
-    "monocode.composerRunner",
+    "avenrail.composerRunner",
     settings.loadComposerRunner,
     settings.saveComposerRunner,
     true,
-    "monocode:composer-runner-change",
+    "avenrail:composer-runner-change",
   ],
   [
-    "monocode.notesEnabled",
-    settings.loadNotesEnabled,
-    settings.saveNotesEnabled,
-    true,
-    "monocode:notes-enabled-change",
-  ],
-  [
-    "monocode.liveAgentsEnabled",
+    "avenrail.liveAgentsEnabled",
     settings.loadLiveAgentsEnabled,
     settings.saveLiveAgentsEnabled,
     true,
-    "monocode:live-agents-enabled-change",
+    "avenrail:live-agents-enabled-change",
   ],
   [
-    "monocode.closeToTray",
+    "avenrail.closeToTray",
     settings.loadCloseToTray,
     settings.saveCloseToTray,
     true,
     undefined,
   ],
   [
-    "monocode.gridArcadeEnabled",
+    "avenrail.gridArcadeEnabled",
     settings.loadGridArcadeEnabled,
     settings.saveGridArcadeEnabled,
     true,
-    "monocode:grid-arcade-enabled-change",
+    "avenrail:grid-arcade-enabled-change",
   ],
   [
-    "monocode.claudeHooks",
+    "avenrail.claudeHooks",
     settings.loadClaudeHooks,
     settings.saveClaudeHooks,
     true,
     undefined,
   ],
   [
-    "monocode.bodyGlass",
+    "avenrail.bodyGlass",
     appearance.loadBodyGlass,
     appearance.saveBodyGlass,
     appearance.BODY_GLASS_DEFAULT,
     undefined,
   ],
   [
-    "monocode.projectRailOpen",
+    "avenrail.projectRailOpen",
     appearance.loadProjectRailOpen,
     appearance.saveProjectRailOpen,
     true,
     undefined,
   ],
   [
-    "monocode.sessionSidebarOpen",
+    "avenrail.sessionSidebarOpen",
     appearance.loadSessionSidebarOpen,
     appearance.saveSessionSidebarOpen,
     true,
     undefined,
   ],
   [
-    "monocode.transcriptAnchor",
+    "avenrail.transcriptAnchor",
     appearance.loadTranscriptAnchor,
     appearance.saveTranscriptAnchor,
     true,
-    "monocode:transcriptanchorchange",
+    "avenrail:transcriptanchorchange",
   ],
 ] as const)("%s", (key, load, save, fallback, eventName) => {
   it("uses its default when unset or unreadable", () => {

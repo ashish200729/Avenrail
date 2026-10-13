@@ -7,7 +7,10 @@ import { codexCommandPresentation } from "../../../integrations/harness/provider
 import { recoverCursorSubagents } from "../../../integrations/harness/providers/cursor/cursorSubagents";
 import { persistableAttachment } from "../model/attachments";
 import type { ContextUsage } from "../model/contextUsage";
-import { isRemoteProjectPath, normalizeProjectPath } from "../../projects/model/recents";
+import {
+  isRemoteProjectPath,
+  normalizeProjectPath,
+} from "../../projects/model/recents";
 import {
   claudeShellCommands,
   ompActiveAssistantTexts,
@@ -514,7 +517,10 @@ export async function deleteSession(
     await enqueueSessionWrite(sessionId, () =>
       invoke<void>("session_delete", { sessionId, imagePaths }),
     );
-    const tombstone = setTimeout(() => deletedSessionIds.delete(sessionId), 60_000);
+    const tombstone = setTimeout(
+      () => deletedSessionIds.delete(sessionId),
+      60_000,
+    );
     if (typeof tombstone === "object") tombstone.unref();
   } catch (error) {
     deletedSessionIds.delete(sessionId);
@@ -647,7 +653,8 @@ function sanitizeBlock(
   const turnModel = sanitizeTurnModel(block.turnModel);
   if (block.role === "user" && turnModel) next.turnModel = turnModel;
   if (block.role === "user" && block.draft) next.draft = true;
-  if (block.role === "user" && block.monocode) next.monocode = true;
+  if (block.role === "user" && (block.avenrail || block.monocode))
+    next.avenrail = true;
   if (
     block.role === "user" &&
     (block.intent === "plan" || block.intent === "orchestrate")
@@ -860,14 +867,17 @@ function sanitizeBtwThreads(
   return threads.length > 0 ? threads : undefined;
 }
 
-function sanitizeGeneratedImage(value: unknown): GeneratedImageMeta | undefined {
+function sanitizeGeneratedImage(
+  value: unknown,
+): GeneratedImageMeta | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
   const record = value as Record<string, unknown>;
   const path = typeof record.path === "string" ? record.path.trim() : "";
   const name = typeof record.name === "string" ? record.name.trim() : "";
-  const mimeType = typeof record.mimeType === "string" ? record.mimeType.trim() : "";
+  const mimeType =
+    typeof record.mimeType === "string" ? record.mimeType.trim() : "";
   const size = record.size;
   if (
     !path ||

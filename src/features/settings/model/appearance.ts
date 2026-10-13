@@ -8,36 +8,36 @@ import {
   clearPreparedNewThreadBackground,
 } from "./newThreadBackgroundEffects";
 
-const ACCENT_COLOR_KEY = "monocode.accentColor";
-const THEME_HUE_KEY = "monocode.themeHue";
-const THEME_SATURATION_KEY = "monocode.themeSaturation";
-const THEME_DARK_LIGHTNESS_KEY = "monocode.themeDarkLightness";
-const OPACITY_KEY = "monocode.sidebarOpacity";
-const BLUR_KEY = "monocode.sidebarBlur";
-const PROJECT_RAIL_OPEN_KEY = "monocode.projectRailOpen";
-const SESSION_SIDEBAR_OPEN_KEY = "monocode.sessionSidebarOpen";
-const BODY_KEY = "monocode.bodyGlass";
-const SCHEME_KEY = "monocode.colorScheme";
-const SIDEBAR_TAB_ORDER_KEY = "monocode.sidebarTabOrder";
-const PROJECT_RAIL_WIDTH_KEY = "monocode.projectRailWidth";
-const TRANSCRIPT_LAYOUT_KEY = "monocode.transcriptLayout";
-const TRANSCRIPT_ANCHOR_KEY = "monocode.transcriptAnchor";
-const CHAT_BACKGROUND_PATH_KEY = "monocode.chatBackgroundPath";
-const CHAT_BACKGROUND_OPACITY_KEY = "monocode.chatBackgroundOpacity";
-const CHAT_BACKGROUND_EMPTY_OPACITY_KEY = "monocode.chatBackgroundEmptyOpacity";
+const ACCENT_COLOR_KEY = "avenrail.accentColor";
+const THEME_HUE_KEY = "avenrail.themeHue";
+const THEME_SATURATION_KEY = "avenrail.themeSaturation";
+const THEME_DARK_LIGHTNESS_KEY = "avenrail.themeDarkLightness";
+const OPACITY_KEY = "avenrail.sidebarOpacity";
+const BLUR_KEY = "avenrail.sidebarBlur";
+const PROJECT_RAIL_OPEN_KEY = "avenrail.projectRailOpen";
+const SESSION_SIDEBAR_OPEN_KEY = "avenrail.sessionSidebarOpen";
+const BODY_KEY = "avenrail.bodyGlass";
+const SCHEME_KEY = "avenrail.colorScheme";
+const SIDEBAR_TAB_ORDER_KEY = "avenrail.sidebarTabOrder";
+const PROJECT_RAIL_WIDTH_KEY = "avenrail.projectRailWidth";
+const TRANSCRIPT_LAYOUT_KEY = "avenrail.transcriptLayout";
+const TRANSCRIPT_ANCHOR_KEY = "avenrail.transcriptAnchor";
+const CHAT_BACKGROUND_PATH_KEY = "avenrail.chatBackgroundPath";
+const CHAT_BACKGROUND_OPACITY_KEY = "avenrail.chatBackgroundOpacity";
+const CHAT_BACKGROUND_EMPTY_OPACITY_KEY = "avenrail.chatBackgroundEmptyOpacity";
 const CHAT_BACKGROUND_SESSION_OPACITY_KEY =
-  "monocode.chatBackgroundSessionOpacity";
-const CHAT_BACKGROUND_SCOPE_KEY = "monocode.chatBackgroundScope";
-const NEW_THREAD_BACKGROUND_EFFECT_KEY = "monocode.newThreadBackgroundEffect";
-const CHANGES_VIEW_KEY = "monocode.changesView";
-const SHOW_EXCLUDED_FILES_KEY = "monocode.showExcludedFiles";
+  "avenrail.chatBackgroundSessionOpacity";
+const CHAT_BACKGROUND_SCOPE_KEY = "avenrail.chatBackgroundScope";
+const NEW_THREAD_BACKGROUND_EFFECT_KEY = "avenrail.newThreadBackgroundEffect";
+const CHANGES_VIEW_KEY = "avenrail.changesView";
+const SHOW_EXCLUDED_FILES_KEY = "avenrail.showExcludedFiles";
 let chatBackgroundRevision = Date.now();
 let nativeGlassReady = false;
 let glassFadeTimer: number | undefined;
 let glassSyncGeneration = 0;
 
 export const CHAT_BACKGROUND_PATH_CHANGE_EVENT =
-  "monocode:chat-background-path-change";
+  "avenrail:chat-background-path-change";
 
 export type ColorScheme = "dark" | "light";
 export type ThemePreference = ColorScheme | "system";
@@ -82,7 +82,7 @@ export const THEME_PREFERENCE_DEFAULT: ThemePreference = "dark";
 export const ACCENT_COLOR_DEFAULT = null;
 
 /** Fired on `window` whenever the color scheme flips (detail: ColorScheme). */
-export const SCHEME_CHANGE_EVENT = "monocode:schemechange";
+export const SCHEME_CHANGE_EVENT = "avenrail:schemechange";
 
 export const TRANSCRIPT_LAYOUT_DEFAULT: TranscriptLayout = "full";
 
@@ -91,16 +91,16 @@ export const CHANGES_VIEW_DEFAULT: ChangesView = "list";
 export const TRANSCRIPT_ANCHOR_DEFAULT = true;
 
 /** Fired on `window` whenever prompt-to-top anchoring flips (detail: boolean). */
-export const TRANSCRIPT_ANCHOR_CHANGE_EVENT = "monocode:transcriptanchorchange";
+export const TRANSCRIPT_ANCHOR_CHANGE_EVENT = "avenrail:transcriptanchorchange";
 
 /** Fired on `window` whenever the transcript layout flips (detail: TranscriptLayout). */
-export const TRANSCRIPT_LAYOUT_CHANGE_EVENT = "monocode:transcriptlayoutchange";
+export const TRANSCRIPT_LAYOUT_CHANGE_EVENT = "avenrail:transcriptlayoutchange";
 
 export const SHOW_EXCLUDED_FILES_DEFAULT = false;
 
 /** Fired on `window` whenever the explorer excluded-files setting flips (detail: boolean). */
 export const SHOW_EXCLUDED_FILES_CHANGE_EVENT =
-  "monocode:showexcludedfileschange";
+  "avenrail:showexcludedfileschange";
 
 export type SidebarTabId = "files" | "sessions" | "changes" | "inbox";
 
@@ -135,8 +135,8 @@ export const PROJECT_RAIL_WIDTH_MIN = 240;
 export const PROJECT_RAIL_WIDTH_MAX = 360;
 export const PROJECT_RAIL_WIDTH_DEFAULT = 280;
 
-const WORKSPACE_PANEL_OPEN_KEY = "monocode.workspacePanelOpen";
-const WORKSPACE_PANEL_WIDTH_KEY = "monocode.workspacePanelWidth.v2";
+const WORKSPACE_PANEL_OPEN_KEY = "avenrail.workspacePanelOpen";
+const WORKSPACE_PANEL_WIDTH_KEY = "avenrail.workspacePanelWidth.v2";
 export const WORKSPACE_PANEL_WIDTH_MIN = 440;
 export const WORKSPACE_PANEL_WIDTH_MAX = 1600;
 export const WORKSPACE_PANEL_WIDTH_DEFAULT = 760;
@@ -767,7 +767,7 @@ export function saveProjectRailOpen(value: boolean) {
 export function loadSessionSidebarOpen(): boolean {
   return (
     readFlag(SESSION_SIDEBAR_OPEN_KEY) ??
-    readFlag("monocode.sidebarOpen") ??
+    readFlag("avenrail.sidebarOpen") ??
     true
   );
 }

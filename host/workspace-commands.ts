@@ -253,11 +253,16 @@ export class WorkspaceCommands {
       missing = missing ? `${basename(actual)}/${missing}` : basename(actual);
       actual = parent;
     }
+    // Projects can nest. The deepest root that contains the path owns it, so a
+    // project's own root is never mistaken for a subfolder of its parent.
+    let owner: Located | undefined;
     for (const root of await this.allowedRoots()) {
       const rel = relative(root, actual);
-      if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)))
-        return { root, relative: rel };
+      if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) continue;
+      if (!owner || rel.length < owner.relative.length)
+        owner = { root, relative: rel };
     }
+    if (owner) return owner;
     throw new Error("Path is outside this machine’s projects");
   }
 
@@ -342,7 +347,7 @@ export class WorkspaceCommands {
     if (await stat(path).then((info) => info.isDirectory(), () => false))
       throw new Error("Cannot save text to a directory.");
     // Replace atomically, as the local command does.
-    const temporary = `${path}.monocode-${process.pid}-${Date.now()}`;
+    const temporary = `${path}.avenrail-${process.pid}-${Date.now()}`;
     await writeFile(temporary, content, "utf8");
     await rename(temporary, path).catch(async (reason) => {
       await rm(temporary, { force: true });

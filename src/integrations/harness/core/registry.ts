@@ -398,7 +398,7 @@ export async function refreshHarnessCatalogs(
         if (!adapter.refreshCatalog) return;
         if (!options?.force && hasLiveCatalog(adapter.id)) return;
         await adapter.refreshCatalog().catch((error: unknown) => {
-          console.debug(`[monocode] ${adapter.id} catalog`, error);
+          console.debug(`[avenrail] ${adapter.id} catalog`, error);
         });
       }),
   );

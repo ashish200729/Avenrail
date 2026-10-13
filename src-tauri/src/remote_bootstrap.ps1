@@ -1,10 +1,10 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$base = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.monocode-host'
+$base = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.avenrail-host'
 $version = @@VERSION@@
 $release = @@RELEASE@@
-$forceUpgrade = $env:MONOCODE_HOST_FORCE_UPGRADE -eq '1'
-$hostPort = if ($env:MONOCODE_HOST_PORT) { [int] $env:MONOCODE_HOST_PORT } else { 3774 }
+$forceUpgrade = $env:AVENRAIL_HOST_FORCE_UPGRADE -eq '1'
+$hostPort = if ($env:AVENRAIL_HOST_PORT) { [int] $env:AVENRAIL_HOST_PORT } else { 3774 }
 @@ACL@@
 
 function Download-Avenrail([string] $Url, [string] $Destination) {
@@ -57,7 +57,7 @@ try {
       'ARM64' { $target = 'win32-arm64' }
       default { throw 'Avenrail Host requires x64 or ARM64 Windows.' }
     }
-    $filename = "monocode-host-$target.zip"
+    $filename = "avenrail-host-$target.zip"
     $runtimeRoot = Join-Path $base 'runtime'
     New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
     $temporary = Join-Path $runtimeRoot ('.install-' + [Guid]::NewGuid().ToString('N'))
@@ -82,7 +82,7 @@ try {
     $runtimeName = Split-Path -Leaf $runtime
     # Keep the batch file ASCII; cmd's set /p would misread a UTF-8 profile path.
     $launcher = "@echo off`r`nsetlocal DisableDelayedExpansion`r`n`"%~dp0..\runtime\$runtimeName\node.exe`" `"%~dp0..\runtime\$runtimeName\host.mjs`" %*`r`nexit /b %errorlevel%`r`n"
-    [IO.File]::WriteAllText((Join-Path $bin 'monocode-host.cmd'), $launcher, [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText((Join-Path $bin 'avenrail-host.cmd'), $launcher, [Text.Encoding]::ASCII)
     $nextPointer = Join-Path $temporary 'runtime-path'
     [IO.File]::WriteAllText($nextPointer, $runtime, (New-Object Text.UTF8Encoding($false)))
     if (Test-Path -LiteralPath $pointer) {

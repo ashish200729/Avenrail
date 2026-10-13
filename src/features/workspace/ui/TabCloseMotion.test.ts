@@ -3,9 +3,6 @@ import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SurfaceTabs } from "./SurfaceTabs";
-import { TitleBar, type Tab } from "../../../app/shell/TitleBar";
-
-vi.mock("../../../app/shell/WindowControls", () => ({ WindowControls: () => null }));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -24,19 +21,6 @@ function mockLocalStorage() {
   });
 }
 
-function workspaceTab(id: string): Tab {
-  return {
-    id,
-    project: "project",
-    title: id,
-    more: [],
-    sessionCount: 1,
-    harnesses: [],
-    busyHarnesses: [],
-    files: [],
-  };
-}
-
 function flushPaint() {
   act(() => {
     vi.advanceTimersToNextFrame();
@@ -47,7 +31,7 @@ function flushPaint() {
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   mockLocalStorage();
-  localStorage.setItem("monocode.tabAnimationsEnabled", "1");
+  localStorage.setItem("avenrail.tabAnimationsEnabled", "1");
   vi.useFakeTimers();
   document.documentElement.style.setProperty(
     "--motion-tab-close-duration",
@@ -74,42 +58,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function closeTab(
-  kind: "workspace" | "file",
-  id: string,
-  ids: string[],
-  pointer = false,
-) {
+function closeTab(id: string, ids: string[], pointer = false) {
   function Tabs() {
     const [current, setCurrent] = useState(ids);
     const close = (tabId: string) =>
       setCurrent((entries) => entries.filter((entry) => entry !== tabId));
-    return kind === "workspace"
-      ? createElement(TitleBar, {
-          tabs: current.map(workspaceTab),
-          activeId: current.includes("first") ? "first" : current[0],
-          cwd: "/project",
-          onToggleSidebar: vi.fn(),
-          onNew: vi.fn(),
-          onSelect: vi.fn(),
-          onClose: close,
-          onCloseMany: vi.fn(),
-          onReorder: vi.fn(),
-        })
-      : createElement(SurfaceTabs, {
-          files: current.map((tabId) => ({
-            id: tabId,
-            path: tabId,
-            cwd: "/project",
-          })),
-          activeFileId: current.includes("first") ? "first" : current[0],
-          dirtyFileIds: new Set<string>(),
-          fileErrorCounts: new Map<string, number>(),
-          onSelectFile: vi.fn(),
-          onCloseFile: close,
-          onCloseOtherFiles: vi.fn(),
-          onReorder: vi.fn(),
-        });
+    return createElement(SurfaceTabs, {
+      files: current.map((tabId) => ({
+        id: tabId,
+        path: tabId,
+        cwd: "/project",
+      })),
+      activeFileId: current.includes("first") ? "first" : current[0],
+      dirtyFileIds: new Set<string>(),
+      fileErrorCounts: new Map<string, number>(),
+      onSelectFile: vi.fn(),
+      onCloseFile: close,
+      onCloseOtherFiles: vi.fn(),
+      onReorder: vi.fn(),
+    });
   }
 
   act(() => root.render(createElement(Tabs)));
@@ -130,9 +97,9 @@ function closeTab(
   });
 }
 
-describe.each(["workspace", "file"] as const)("%s tab close motion", (kind) => {
+describe("file tab close motion", () => {
   it("collapses the closed tab's width before removing it", () => {
-    closeTab(kind, "second", ["first", "second", "third"]);
+    closeTab("second", ["first", "second", "third"]);
     const ghost = container.querySelector<HTMLElement>("[data-closing-tab]");
     expect(ghost).toBeInstanceOf(HTMLElement);
     expect(ghost!.style.getPropertyValue("--tab-slot-width")).toBe("140px");
@@ -158,7 +125,7 @@ describe.each(["workspace", "file"] as const)("%s tab close motion", (kind) => {
   });
 
   it("collapses the last tab in place", () => {
-    closeTab(kind, "third", ["first", "second", "third"]);
+    closeTab("third", ["first", "second", "third"]);
     const ghost = container.querySelector<HTMLElement>("[data-closing-tab]");
     expect(ghost).toBeInstanceOf(HTMLElement);
     expect(ghost!.style.getPropertyValue("--tab-slot-width")).toBe("140px");
@@ -177,7 +144,7 @@ describe.each(["workspace", "file"] as const)("%s tab close motion", (kind) => {
     vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue(
       new DOMRect(0, 0, 0, 0),
     );
-    closeTab(kind, "second", ["first", "second", "third"]);
+    closeTab("second", ["first", "second", "third"]);
     const ghost = container.querySelector<HTMLElement>("[data-closing-tab]");
     expect(ghost).toBeInstanceOf(HTMLElement);
     expect(ghost!.style.getPropertyValue("--tab-slot-width")).toBe("14rem");
@@ -196,20 +163,20 @@ describe.each(["workspace", "file"] as const)("%s tab close motion", (kind) => {
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
-    closeTab(kind, "second", ["first", "second", "third"]);
+    closeTab("second", ["first", "second", "third"]);
     expect(container.querySelector("[data-closing-tab]")).toBeNull();
     expect(container.querySelector('[aria-label="Close second"]')).toBeNull();
   });
 
   it("skips the collapse when tab animations are disabled", () => {
-    localStorage.setItem("monocode.tabAnimationsEnabled", "0");
-    closeTab(kind, "second", ["first", "second", "third"]);
+    localStorage.setItem("avenrail.tabAnimationsEnabled", "0");
+    closeTab("second", ["first", "second", "third"]);
     expect(container.querySelector("[data-closing-tab]")).toBeNull();
     expect(container.querySelector('[aria-label="Close second"]')).toBeNull();
   });
 
   it("does not stage a second resize after an X-button close", () => {
-    closeTab(kind, "second", ["first", "second", "third"], true);
+    closeTab("second", ["first", "second", "third"], true);
 
     expect(container.querySelector("[data-tab-close-mode]")).toBeNull();
     const liveSlots = Array.from(
@@ -230,33 +197,21 @@ describe.each(["workspace", "file"] as const)("%s tab close motion", (kind) => {
   });
 });
 
-function addThird(kind: "workspace" | "file") {
+function addThird() {
   let add = () => {};
   function Tabs() {
     const [ids, setIds] = useState(["first", "second"]);
     add = () => setIds(["first", "second", "third"]);
-    return kind === "workspace"
-      ? createElement(TitleBar, {
-          tabs: ids.map(workspaceTab),
-          activeId: ids[ids.length - 1],
-          cwd: "/project",
-          onToggleSidebar: vi.fn(),
-          onNew: vi.fn(),
-          onSelect: vi.fn(),
-          onClose: vi.fn(),
-          onCloseMany: vi.fn(),
-          onReorder: vi.fn(),
-        })
-      : createElement(SurfaceTabs, {
-          files: ids.map((id) => ({ id, path: id, cwd: "/project" })),
-          activeFileId: ids[ids.length - 1],
-          dirtyFileIds: new Set<string>(),
-          fileErrorCounts: new Map<string, number>(),
-          onSelectFile: vi.fn(),
-          onCloseFile: vi.fn(),
-          onCloseOtherFiles: vi.fn(),
-          onReorder: vi.fn(),
-        });
+    return createElement(SurfaceTabs, {
+      files: ids.map((id) => ({ id, path: id, cwd: "/project" })),
+      activeFileId: ids[ids.length - 1],
+      dirtyFileIds: new Set<string>(),
+      fileErrorCounts: new Map<string, number>(),
+      onSelectFile: vi.fn(),
+      onCloseFile: vi.fn(),
+      onCloseOtherFiles: vi.fn(),
+      onReorder: vi.fn(),
+    });
   }
 
   act(() => root.render(createElement(Tabs)));
@@ -264,9 +219,9 @@ function addThird(kind: "workspace" | "file") {
   act(() => add());
 }
 
-describe.each(["workspace", "file"] as const)("%s tab open motion", (kind) => {
+describe("file tab open motion", () => {
   it("expands a new tab from zero width", () => {
-    addThird(kind);
+    addThird();
     const incoming = container.querySelector<HTMLElement>("[data-opening-tab]");
     expect(incoming).toBeInstanceOf(HTMLElement);
     expect(incoming!.hasAttribute("data-collapsed")).toBe(true);
@@ -298,7 +253,7 @@ describe.each(["workspace", "file"] as const)("%s tab open motion", (kind) => {
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
-    addThird(kind);
+    addThird();
     expect(container.querySelector("[data-opening-tab]")).toBeNull();
     expect(
       container.querySelector('[aria-label="Close third"]'),
@@ -306,8 +261,8 @@ describe.each(["workspace", "file"] as const)("%s tab open motion", (kind) => {
   });
 
   it("skips the expand when tab animations are disabled", () => {
-    localStorage.setItem("monocode.tabAnimationsEnabled", "0");
-    addThird(kind);
+    localStorage.setItem("avenrail.tabAnimationsEnabled", "0");
+    addThird();
     expect(container.querySelector("[data-opening-tab]")).toBeNull();
     expect(
       container.querySelector('[aria-label="Close third"]'),

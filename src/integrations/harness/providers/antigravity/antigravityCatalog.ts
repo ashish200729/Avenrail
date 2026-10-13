@@ -13,7 +13,7 @@ import {
   modelsFromSessionNew,
 } from "./antigravityProtocol";
 
-const PROBE_ID = "monocode-antigravity-probe";
+const PROBE_ID = "avenrail-antigravity-probe";
 const REQUEST_TIMEOUT_MS = 12_000;
 let inflight: Promise<void> | null = null;
 
@@ -25,7 +25,7 @@ export function refreshAntigravityCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       // Preserve the last live catalog (or startup seeds) when offline/logged out.
-      console.debug("[monocode] antigravity catalog", error);
+      console.debug("[avenrail] antigravity catalog", error);
     })
     .finally(() => {
       inflight = null;

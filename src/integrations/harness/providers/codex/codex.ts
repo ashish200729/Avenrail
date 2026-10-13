@@ -795,7 +795,7 @@ function handleNotification(
   const mapped = mapCodexNotification(method, params);
   if (mapped.diagnostic) {
     console.debug(
-      `[monocode] codex ${live.threadId} ${method}`,
+      `[avenrail] codex ${live.threadId} ${method}`,
       mapped.diagnostic,
     );
   }

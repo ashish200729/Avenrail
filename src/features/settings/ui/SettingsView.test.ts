@@ -19,10 +19,7 @@ import {
   clearCachedRateLimits,
   setCachedRateLimits,
 } from "../../providers/model/rateLimitsCache";
-import {
-  HARNESSES,
-  HARNESS_TITLE,
-} from "../../sessions/model/session";
+import { HARNESSES, HARNESS_TITLE } from "../../sessions/model/session";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async () => undefined),
@@ -177,7 +174,7 @@ describe("settings pages", () => {
 
   it("shows background effect choices above scope when artwork is available", async () => {
     localStorage.setItem(
-      "monocode.chatBackgroundPath",
+      "avenrail.chatBackgroundPath",
       "/app-data/backgrounds/chat-background.png",
     );
     await render("appearance");
@@ -200,7 +197,7 @@ describe("settings pages", () => {
       vi.fn(async () => ({ ok: false })),
     );
     await act(async () => (effect as HTMLButtonElement).click());
-    expect(localStorage.getItem("monocode.newThreadBackgroundEffect")).toBe(
+    expect(localStorage.getItem("avenrail.newThreadBackgroundEffect")).toBe(
       "dither",
     );
     expect(effect.getAttribute("aria-checked")).toBe("true");
@@ -210,8 +207,8 @@ describe("settings pages", () => {
   });
 
   it("previews and restores Haze with the existing empty-chat visibility", async () => {
-    localStorage.setItem("monocode.chatBackgroundPath", "/background.png");
-    localStorage.setItem("monocode.chatBackgroundEmptyOpacity", "0.4");
+    localStorage.setItem("avenrail.chatBackgroundPath", "/background.png");
+    localStorage.setItem("avenrail.chatBackgroundEmptyOpacity", "0.4");
     await render("appearance");
 
     const option = container.querySelector<HTMLButtonElement>(
@@ -226,7 +223,7 @@ describe("settings pages", () => {
     expect(option.getAttribute("aria-checked")).toBe("true");
     expect(preview.style.opacity).toBe("0.4");
     expect(preview.querySelectorAll("span")).toHaveLength(2);
-    expect(localStorage.getItem("monocode.newThreadBackgroundEffect")).toBe(
+    expect(localStorage.getItem("avenrail.newThreadBackgroundEffect")).toBe(
       "gradient-blur",
     );
 
@@ -355,7 +352,9 @@ describe("settings pages", () => {
     const save = async (provider: "Codex" | "OpenCode", path: string) => {
       const id = `${provider.toLowerCase()}-binary-path`;
       if (!document.querySelector(`#${id}`)) {
-        if (!document.querySelector(`[aria-label="Edit ${provider} CLI path"]`)) {
+        if (
+          !document.querySelector(`[aria-label="Edit ${provider} CLI path"]`)
+        ) {
           await act(async () =>
             container
               .querySelector<HTMLButtonElement>(
@@ -387,7 +386,7 @@ describe("settings pages", () => {
     await save("OpenCode", "/opt/opencode/bin/opencode");
     expect(
       JSON.parse(
-        localStorage.getItem("monocode.providerBinaryPaths.v1") ?? "{}",
+        localStorage.getItem("avenrail.providerBinaryPaths.v1") ?? "{}",
       ),
     ).toEqual({
       codex: "/opt/codex/bin/codex",
@@ -413,15 +412,17 @@ describe("settings pages", () => {
     expect(container.textContent).not.toContain("/opt/codex/bin/codex");
     expect(
       JSON.parse(
-        localStorage.getItem("monocode.providerBinaryPaths.v1") ?? "{}",
+        localStorage.getItem("avenrail.providerBinaryPaths.v1") ?? "{}",
       ).codex,
     ).toBe("/opt/codex/bin/codex");
     await act(async () =>
-      Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
-        (button) => button.textContent === "Cancel",
-      )!.click(),
+      Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+        .find((button) => button.textContent === "Cancel")!
+        .click(),
     );
-    expect(document.querySelector('[aria-label="Retry Codex configured path"]')).not.toBeNull();
+    expect(
+      document.querySelector('[aria-label="Retry Codex configured path"]'),
+    ).not.toBeNull();
 
     failAutoCodex = true;
     await save("Codex", "");
@@ -430,7 +431,7 @@ describe("settings pages", () => {
     );
     expect(
       JSON.parse(
-        localStorage.getItem("monocode.providerBinaryPaths.v1") ?? "{}",
+        localStorage.getItem("avenrail.providerBinaryPaths.v1") ?? "{}",
       ).codex,
     ).toBe("/opt/codex/bin/codex");
 
@@ -438,7 +439,7 @@ describe("settings pages", () => {
     await save("Codex", "");
     expect(
       JSON.parse(
-        localStorage.getItem("monocode.providerBinaryPaths.v1") ?? "{}",
+        localStorage.getItem("avenrail.providerBinaryPaths.v1") ?? "{}",
       ).codex,
     ).toBeUndefined();
     await act(async () => details.click());
@@ -581,7 +582,7 @@ describe("settings pages", () => {
     await act(async () => topBar?.click());
 
     expect(topBar?.getAttribute("aria-checked")).toBe("true");
-    expect(localStorage.getItem("monocode.fileTabMode")).toBe("workspace");
+    expect(localStorage.getItem("avenrail.fileTabMode")).toBe("workspace");
   });
 
   it("offers tab animations as an opt-in", async () => {
@@ -593,7 +594,7 @@ describe("settings pages", () => {
     expect(control.getAttribute("aria-checked")).toBe("false");
     await act(async () => control.click());
     expect(control.getAttribute("aria-checked")).toBe("true");
-    expect(localStorage.getItem("monocode.tabAnimationsEnabled")).toBe("1");
+    expect(localStorage.getItem("avenrail.tabAnimationsEnabled")).toBe("1");
   });
 
   it("defaults to the icon rail and lets users hide it", async () => {
@@ -611,7 +612,7 @@ describe("settings pages", () => {
     await act(async () => hidden?.click());
 
     expect(hidden?.getAttribute("aria-checked")).toBe("true");
-    expect(localStorage.getItem("monocode.collapsedProjectRailMode")).toBe(
+    expect(localStorage.getItem("avenrail.collapsedProjectRailMode")).toBe(
       "hidden",
     );
 
@@ -645,7 +646,7 @@ describe("settings pages", () => {
     expect(option).toBeTruthy();
     await act(async () => option!.click());
 
-    expect(localStorage.getItem("monocode.uiScale")).toBe("1.5");
+    expect(localStorage.getItem("avenrail.uiScale")).toBe("1.5");
     expect(trigger.getAttribute("aria-label")).toBe("Interface scale: 150%");
     document.documentElement.style.removeProperty("zoom");
   });
@@ -686,7 +687,9 @@ describe("settings pages", () => {
   it("shows path details for every Agent CLI", async () => {
     await render("providers");
     expect(
-      vi.mocked(invoke).mock.calls.some(([command]) => command === "harness_exec"),
+      vi
+        .mocked(invoke)
+        .mock.calls.some(([command]) => command === "harness_exec"),
     ).toBe(false);
     for (const harness of HARNESSES) {
       expect(
@@ -716,7 +719,8 @@ describe("settings pages", () => {
     vi.mocked(invoke).mockImplementation(async (command) => {
       if (command === "harness_resolve_codex") return { path: "/auto/codex" };
       if (command === "harness_exec") return "codex-cli 0.156.1";
-      if (command === "reveal_path") throw new Error("File manager unavailable");
+      if (command === "reveal_path")
+        throw new Error("File manager unavailable");
       return undefined;
     });
     await render("providers");
@@ -789,7 +793,7 @@ describe("settings search", () => {
     await render("general");
     await type("project notifications");
     expect(options().map((item) => item.textContent)).toEqual([
-      "Project notificationsInbox",
+      "Project notificationsPRs & issues",
     ]);
 
     await act(async () => options()[0]!.click());
@@ -821,7 +825,7 @@ describe("settings search", () => {
       "Project notifications",
       "Claude Code hooks",
       "General",
-      "Inbox",
+      "PRs & issues",
     ]);
   });
 
@@ -860,7 +864,7 @@ describe("settings search", () => {
       ),
     );
 
-    expect(localStorage.getItem("monocode.keybindingOverrides")).toBe(
+    expect(localStorage.getItem("avenrail.keybindingOverrides")).toBe(
       '{"App: Search":{"shortcut":"Control+Shift+KeyM"}}',
     );
     expect(input.value).toBe("Ctrl+Shift+M");
@@ -897,7 +901,7 @@ describe("settings search", () => {
         }),
       ),
     );
-    expect(localStorage.getItem("monocode.keybindingOverrides")).toBe(
+    expect(localStorage.getItem("avenrail.keybindingOverrides")).toBe(
       '{"App: Search":{"shortcut":"Command+Delete"}}',
     );
   });
@@ -949,7 +953,7 @@ describe("settings search", () => {
       ),
     );
 
-    expect(localStorage.getItem("monocode.keybindingOverrides")).toBe(
+    expect(localStorage.getItem("avenrail.keybindingOverrides")).toBe(
       '{"App: Search":{"shortcut":"Option+KeyM"}}',
     );
     expect(input.value).toBe("Alt+M");
@@ -972,7 +976,7 @@ describe("settings search", () => {
       ),
     );
 
-    expect(localStorage.getItem("monocode.keybindingOverrides")).toBe(
+    expect(localStorage.getItem("avenrail.keybindingOverrides")).toBe(
       '{"App: Search":{"disabled":true}}',
     );
     expect(input.value).toBe("Disabled");
@@ -984,7 +988,7 @@ describe("settings search", () => {
         )!
         .click(),
     );
-    expect(localStorage.getItem("monocode.keybindingOverrides")).toBeNull();
+    expect(localStorage.getItem("avenrail.keybindingOverrides")).toBeNull();
   });
 
   it("reveals a setting on the current page", async () => {
@@ -1012,11 +1016,11 @@ describe("providers scope inheritance", () => {
 
   it("inherits the global default provider and picker visibility in project scope", async () => {
     localStorage.setItem(
-      "monocode.lastModel",
+      "avenrail.lastModel",
       JSON.stringify({ harness: "claude", model: "claude:opus-5" }),
     );
     localStorage.setItem(
-      "monocode.hiddenPickerProviders",
+      "avenrail.hiddenPickerProviders",
       JSON.stringify(["cursor"]),
     );
     await render("providers");

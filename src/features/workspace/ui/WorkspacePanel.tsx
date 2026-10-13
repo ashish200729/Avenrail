@@ -5,6 +5,7 @@ import {
   Maximize2,
   Maximize2 as Minimize2,
   PanelLeft,
+  PanelRight,
   Plus,
   Terminal,
   X,
@@ -52,6 +53,7 @@ import { SourceControl } from "../../source-control/ui/SourceControl";
 import { ProjectSearch } from "../../projects/ui/ProjectSearch";
 import { WorkspaceFiles } from "../../files/ui/WorkspaceFiles";
 import { IconButton } from "../../../app/shell/TitleBar";
+import { WindowControls } from "../../../app/shell/WindowControls";
 import { surfaceTabPresentation } from "./SurfaceTabs";
 
 const EMPTY_VIEW: WorkspaceView = { order: [], activeId: null };
@@ -66,6 +68,12 @@ type Props = {
   open: boolean;
   sidebarOpen?: boolean;
   onShowSidebar?: () => void;
+  /**
+   * The panel spans the full window height, so its header shares the top row
+   * with the title bar and carries the panel toggle and window controls.
+   */
+  chromeAtTop?: boolean;
+  onTogglePanel?: () => void;
   active: boolean;
   activeTabId: string;
   tabs: WorkspaceTab[];
@@ -102,6 +110,8 @@ export function WorkspacePanel({
   open,
   sidebarOpen = true,
   onShowSidebar,
+  chromeAtTop = false,
+  onTogglePanel,
   active,
   activeTabId,
   tabs,
@@ -149,6 +159,11 @@ export function WorkspacePanel({
   const reviewStats = useProjectDiffStats(cwd, active);
   const [treeOpen, setTreeOpen] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const [edges, setEdges] = useState({
+    coversTitleBar: false,
+    underLights: false,
+  });
+  const asideRef = useRef<HTMLElement | null>(null);
   const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
   const plusRef = useRef<HTMLButtonElement>(null);
   const current = tabs.find((tab) => tab.id === activeTabId);
@@ -299,6 +314,40 @@ export function WorkspacePanel({
         : plusRef.current
       )?.focus();
   }, [view.activeId, view.order.join("\0")]);
+  // An expanded or overlaid panel can reach the window's left edge. It then
+  // covers the title bar's sidebar toggle and, on macOS, the traffic lights.
+  useLayoutEffect(() => {
+    const el = asideRef.current;
+    if (!el || !open) return;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      const parent = (
+        el.offsetParent as HTMLElement | null
+      )?.getBoundingClientRect();
+      const next = {
+        coversTitleBar: !!parent && rect.left <= parent.left + 1,
+        underLights: IS_MAC && rect.left < 78 && rect.top < 40,
+      };
+      setEdges((prev) =>
+        prev.coversTitleBar === next.coversTitleBar &&
+        prev.underLights === next.underLights
+          ? prev
+          : next,
+      );
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(el);
+    if (el.offsetParent) observer?.observe(el.offsetParent);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [open, expanded, sidebarOpen]);
   const paneVisible = (paneId: string, tabId: string) =>
     active && tabId === activeTabId && displayed?.pane.id === paneId;
   const dirty = (id: string) =>
@@ -308,9 +357,11 @@ export function WorkspacePanel({
 
   return (
     <aside
-      ref={resize.setPaneRef}
+      ref={(el) => {
+        asideRef.current = el;
+        resize.setPaneRef(el);
+      }}
       aria-label="Workspace tools"
-      data-reserve-traffic-lights={(IS_MAC && !sidebarOpen) || undefined}
       aria-hidden={!open}
       inert={!open || undefined}
       className={`workspace-panel body-glass relative min-h-0 shrink-0 flex-col border-l border-content/10 ${open ? "flex" : "hidden"} ${expanded ? "workspace-panel-expanded" : ""}`}
@@ -327,10 +378,12 @@ export function WorkspacePanel({
       }}
     >
       <header
-        className="workspace-panel-header flex h-10 shrink-0 items-center gap-1 border-b border-content/10 px-2"
+        className={`workspace-panel-header flex h-10 shrink-0 select-none items-center gap-1 border-b border-content/10 ${
+          edges.underLights ? "pl-[78px] pr-2" : "px-2"
+        }`}
         data-tauri-drag-region
       >
-        {!sidebarOpen && onShowSidebar ? (
+        {!sidebarOpen && onShowSidebar && edges.coversTitleBar ? (
           <IconButton label={`Show sidebar (${MOD}B)`} onClick={onShowSidebar}>
             <PanelLeft className="size-3.5" strokeWidth={1.75} />
           </IconButton>
@@ -457,6 +510,21 @@ export function WorkspacePanel({
             <Maximize2 className="size-3.5" />
           )}
         </IconButton>
+        {chromeAtTop && onTogglePanel ? (
+          <button
+            id="workspace-panel-toggle"
+            type="button"
+            aria-label="Hide workspace tools"
+            title="Hide workspace tools"
+            aria-pressed
+            data-tauri-drag-region="false"
+            onClick={onTogglePanel}
+            className="grid size-6.5 shrink-0 place-items-center rounded-md text-content hover:bg-content/10 focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <PanelRight className="size-3.5" strokeWidth={1.75} />
+          </button>
+        ) : null}
+        {chromeAtTop && !IS_MAC ? <WindowControls /> : null}
       </header>
       <div
         id="workspace-content"
@@ -475,12 +543,16 @@ export function WorkspacePanel({
                   key={id}
                   disabled={!project}
                   onClick={() => openTool(id)}
-                  className="flex h-10 w-full items-center gap-3 rounded-lg bg-content/4 px-3 text-left text-sm text-content/85 hover:bg-content/8 focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40"
+                  className="group flex h-11 w-full items-center gap-3 rounded-xl border border-stroke px-2 text-left text-[13px] text-content/85 transition-colors hover:bg-content/4 hover:text-content focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 disabled:hover:bg-transparent"
                 >
-                  <Icon className="size-4 text-content/60" strokeWidth={1.75} />
+                  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-content/6 text-content/70 transition-colors group-hover:bg-content/10 group-hover:text-content">
+                    <Icon className="size-3.5" strokeWidth={1.75} />
+                  </span>
                   <span className="flex-1">{label}</span>
                   {id === "files" ? (
-                    <span className="text-xs text-content/50">{MOD}P</span>
+                    <span className="rounded-md border border-stroke px-1.5 py-0.5 text-[11px] tabular-nums text-content/50">
+                      {MOD}P
+                    </span>
                   ) : null}
                 </button>
               ))}

@@ -11,10 +11,10 @@ import {
   type NewThreadBackgroundEffect,
 } from "../../settings/model/appearance";
 
-const KEY = "monocode:project-chat-backgrounds";
+const KEY = "avenrail:project-chat-backgrounds";
 
 export const PROJECT_CHAT_BACKGROUND_CHANGED =
-  "monocode:project-chat-background-changed";
+  "avenrail:project-chat-background-changed";
 
 export type ProjectChatBackground = {
   path: string;

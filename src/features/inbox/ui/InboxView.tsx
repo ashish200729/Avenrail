@@ -16,7 +16,7 @@ import {
   GitPullRequest,
   GitPullRequestClosed,
   GitPullRequestDraft,
-  Inbox,
+  Triage,
   MessageSquare,
   ListFilter,
   LoaderCircle,
@@ -35,10 +35,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import {
-  InboxFiltersMenu,
-  INBOX_FILTER_MENU_WIDTH,
-} from "./InboxFiltersMenu";
+import { InboxFiltersMenu, INBOX_FILTER_MENU_WIDTH } from "./InboxFiltersMenu";
 import { InboxConnectMenu } from "./InboxConnectMenu";
 import { InboxProviderMark } from "./InboxProviderMark";
 import { ProjectLogoIcon } from "../../projects/ui/ProjectLogoIcon";
@@ -106,8 +103,14 @@ import { copyText } from "../../../platform/tauri/clipboard";
 import { projectKey, projectName } from "../../../shared/lib/paths";
 import { IS_MAC } from "../../../platform/tauri/platform";
 import { playCue } from "../../settings/model/sounds";
-import { sameProjectPath, type RecentProject } from "../../projects/model/recents";
-import { sessionDisplayTitle, type LinkedWorkItem } from "../../sessions/model/session";
+import {
+  sameProjectPath,
+  type RecentProject,
+} from "../../projects/model/recents";
+import {
+  sessionDisplayTitle,
+  type LinkedWorkItem,
+} from "../../sessions/model/session";
 import type { SessionSummary } from "../../sessions/data/sessionStore";
 import {
   inboxItemMatchesLinkedWorkItem,
@@ -189,10 +192,7 @@ import {
   type InboxReplyTarget,
 } from "./InboxComments";
 import { InboxPrDiff } from "./InboxPrDiff";
-import {
-  InboxPrChecks,
-  PrChecksTab,
-} from "./InboxPrChecks";
+import { InboxPrChecks, PrChecksTab } from "./InboxPrChecks";
 import {
   InboxDiscussionPanel,
   type InboxSessionPortal,
@@ -769,11 +769,13 @@ export function InboxView({
 
   const inboxSeenTick = useInboxSeenTick();
   useEffect(() => {
-    rememberInboxItems(items.map((item) => ({
-      key: inboxItemKey(item),
-      updatedAt: item.updatedAt,
-      projectPath: item.projectPath,
-    })));
+    rememberInboxItems(
+      items.map((item) => ({
+        key: inboxItemKey(item),
+        updatedAt: item.updatedAt,
+        projectPath: item.projectPath,
+      })),
+    );
   }, [items]);
   const sourceEntries = useMemo(
     () =>
@@ -897,7 +899,7 @@ export function InboxView({
         {visibleSources.length > 0 ? (
           <div
             role="tablist"
-            aria-label="Inbox source"
+            aria-label="PRs & issues source"
             className="flex min-w-0 basis-0 items-center gap-px"
             style={{ flexGrow: visibleSources.length }}
           >
@@ -938,8 +940,8 @@ export function InboxView({
             <input
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Filter inbox"
-              aria-label="Filter inbox"
+              placeholder="Filter PRs & issues"
+              aria-label="Filter PRs & issues"
               spellCheck={false}
               autoComplete="off"
               className="h-7 w-full rounded-md bg-transparent pl-7 pr-2 text-[12px] text-content outline-none placeholder:text-content/40"
@@ -947,8 +949,8 @@ export function InboxView({
           </div>
           <button
             type="button"
-            title="Filter inbox"
-            aria-label="Filter inbox"
+            title="Filter PRs & issues"
+            aria-label="Filter PRs & issues"
             aria-expanded={!!filterMenu}
             aria-haspopup="menu"
             onClick={onFilterButtonClick}
@@ -963,11 +965,13 @@ export function InboxView({
             title="Mark all as read"
             aria-label="Mark all as read"
             disabled={!sourceHasUnseen}
-            onClick={() => setReadStatusError(
-              markInboxItemsSeen(sourceEntries)
-                ? null
-                : "Could not save read status. Please try again.",
-            )}
+            onClick={() =>
+              setReadStatusError(
+                markInboxItemsSeen(sourceEntries)
+                  ? null
+                  : "Could not save read status. Please try again.",
+              )
+            }
             className="grid size-6 shrink-0 place-items-center rounded-md text-content/45 hover:bg-content/10 hover:text-content disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-content/45"
           >
             <CheckCheck className="size-3.5" strokeWidth={1.75} />
@@ -1000,7 +1004,7 @@ export function InboxView({
       >
         {noSourcesConnected ? (
           <p className="px-3 py-3 text-[12px] text-content/50">
-            Add a connection to start using the Inbox.
+            Add a connection to see your pull requests and issues.
           </p>
         ) : sourceError && visibleItems.length === 0 ? (
           <p className="px-3 py-2 text-[12px] text-content/50">{sourceError}</p>
@@ -1121,7 +1125,7 @@ export function InboxView({
   return (
     <div
       role="region"
-      aria-label="Inbox"
+      aria-label="PRs & issues"
       data-app-inbox
       className="flex min-h-0 min-w-0 flex-1 flex-col text-content"
     >
@@ -1135,11 +1139,11 @@ export function InboxView({
           <OverlayNav onBack={onClose} onToggleSidebar={onToggleSidebar} />
         )}
         <div className="flex min-w-0 flex-1 items-center gap-2 px-3 text-[13px]">
-          <Inbox
+          <Triage
             className="size-3.5 shrink-0 text-content/45"
             strokeWidth={1.75}
           />
-          <span className="min-w-0 truncate text-content">Inbox</span>
+          <span className="min-w-0 truncate text-content">PRs & issues</span>
         </div>
         {IS_MAC ? null : <WindowControls />}
       </div>
@@ -1378,7 +1382,7 @@ function InboxDetailBody({
   if (!item) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-        <Inbox className="mb-3 size-6 text-content/30" strokeWidth={1.75} />
+        <Triage className="mb-3 size-6 text-content/30" strokeWidth={1.75} />
         <p className="text-[13px] text-content/45">Select an inbox item</p>
       </div>
     );
@@ -2160,21 +2164,21 @@ export function InboxDetail({
           ? jiraIssueDetails(jiraKey)
           : Promise.reject(new Error("Missing Jira issue"))
         : gitlabKind
-        ? gitlabWorkItemDetails(item.repo, gitlabKind, item.number)
-        : azureDevOpsKind
-          ? azureDevOpsWorkItemDetails(
-              item.repo,
-              azureDevOpsKind,
-              item.number,
-            )
-          : githubKind
-            ? githubWorkItemDetails(
-                item.projectPath,
+          ? gitlabWorkItemDetails(item.repo, gitlabKind, item.number)
+          : azureDevOpsKind
+            ? azureDevOpsWorkItemDetails(
                 item.repo,
-                githubKind,
+                azureDevOpsKind,
                 item.number,
               )
-            : Promise.reject(new Error("Unknown inbox item"));
+            : githubKind
+              ? githubWorkItemDetails(
+                  item.projectPath,
+                  item.repo,
+                  githubKind,
+                  item.number,
+                )
+              : Promise.reject(new Error("Unknown inbox item"));
     void pending
       .then((next) => {
         if (cancelled) return;
@@ -2740,10 +2744,7 @@ export function InboxDetail({
                           ? { ...item, projectPath: startProject }
                           : item;
                         void Promise.resolve(
-                          onStart(
-                            next,
-                            tracker ? details?.body : undefined,
-                          ),
+                          onStart(next, tracker ? details?.body : undefined),
                         )
                           .catch((err: unknown) => {
                             setStartError(

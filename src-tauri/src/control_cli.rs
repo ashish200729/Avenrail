@@ -74,7 +74,7 @@ under a fresh ID instead would queue a second worker.
 Tasks run inside the Avenrail app, not in this process. Exiting this CLI, or a
 failure here, never cancels a task that was already accepted.
 
-Avenrail sets MONOCODE_CONTROL_ENDPOINT and MONOCODE_CONTROL_TOKEN for the lead
+Avenrail sets AVENRAIL_CONTROL_ENDPOINT and AVENRAIL_CONTROL_TOKEN for the lead
 agent's process only. They are already in your environment; never print them.
 "#;
 
@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 13] = [
+const APP_ACTIONS: [&str; 10] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -93,9 +93,6 @@ const APP_ACTIONS: [&str; 13] = [
     "worktrees.create",
     "folders.list",
     "folders.move",
-    "notes.list",
-    "notes.read",
-    "notes.write",
 ];
 const APP_USAGE: &str = r#"Avenrail app access — use in a thread enabled by /operator.
 
@@ -146,13 +143,6 @@ Actions:
   folders.list   {}  Folders in your current project.
   folders.move   {"sessionId":"...","folderId":"..."}
                   Or use "newFolderName":"Research" to create a folder.
-  notes.list     {"limit":30,"offset":0}  Titles and short previews only.
-  notes.read     {"id":"..."}  Full body of one note.
-  notes.write    {"title":"Plan","body":"Markdown","tags":["work"]}
-                  Create a note linked to this session and project. Omit title
-                  to derive it from the body. Use {"id":"...","body":"..."}
-                  to edit an existing note; title and tags are also optional.
-                  Omitted fields stay unchanged. Reuse --request-id on retries.
 
 The output is one JSON line: {"ok":true,"result":...} or {"ok":false,"error":"..."}.
 Use --input - to pass JSON on stdin. Never print Avenrail credentials.
@@ -184,14 +174,14 @@ fn quoted(value: &str) -> String {
 pub fn help() -> String {
     let exe = std::env::current_exe()
         .map(|path| quoted(&path.to_string_lossy()))
-        .unwrap_or_else(|_| "monocode".into());
+        .unwrap_or_else(|_| "avenrail".into());
     USAGE.replace("{exe}", &exe)
 }
 
 pub fn app_help() -> String {
     let exe = std::env::current_exe()
         .map(|path| quoted(&path.to_string_lossy()))
-        .unwrap_or_else(|_| "monocode".into());
+        .unwrap_or_else(|_| "avenrail".into());
     APP_USAGE.replace("{exe}", &exe)
 }
 
@@ -284,14 +274,14 @@ fn sent(error: impl Into<String>) -> Failure {
 
 fn send(action: &str, input: &Value, request_id: &str, app_mode: bool) -> Result<Value, Failure> {
     let endpoint_key = if app_mode {
-        "MONOCODE_APP_ENDPOINT"
+        "AVENRAIL_APP_ENDPOINT"
     } else {
-        "MONOCODE_CONTROL_ENDPOINT"
+        "AVENRAIL_CONTROL_ENDPOINT"
     };
     let token_key = if app_mode {
-        "MONOCODE_APP_TOKEN"
+        "AVENRAIL_APP_TOKEN"
     } else {
-        "MONOCODE_CONTROL_TOKEN"
+        "AVENRAIL_CONTROL_TOKEN"
     };
     let endpoint = std::env::var(endpoint_key).map_err(|_| {
         unsent(if app_mode {
@@ -506,14 +496,14 @@ mod tests {
     #[test]
     fn quotes_the_control_path_only_when_the_shell_needs_it() {
         assert_eq!(
-            quoted("/Applications/Avenrail.app/Contents/MacOS/monocode"),
-            "/Applications/Avenrail.app/Contents/MacOS/monocode"
+            quoted("/Applications/Avenrail.app/Contents/MacOS/avenrail"),
+            "/Applications/Avenrail.app/Contents/MacOS/avenrail"
         );
         assert_eq!(quoted("/Users/a b/Avenrail"), "'/Users/a b/Avenrail'");
-        assert_eq!(quoted("C:\\Tools\\monocode.exe"), "C:\\Tools\\monocode.exe");
+        assert_eq!(quoted("C:\\Tools\\avenrail.exe"), "C:\\Tools\\avenrail.exe");
         assert_eq!(
-            quoted("C:\\Program Files\\Avenrail\\monocode.exe"),
-            "\"C:\\Program Files\\Avenrail\\monocode.exe\""
+            quoted("C:\\Program Files\\Avenrail\\avenrail.exe"),
+            "\"C:\\Program Files\\Avenrail\\avenrail.exe\""
         );
         // A backslash escapes in a POSIX shell, so bare would rewrite the path.
         assert_eq!(quoted("/Users/a\\b/Avenrail"), "'/Users/a\\b/Avenrail'");
@@ -522,7 +512,7 @@ mod tests {
     #[test]
     fn app_mode_exposes_only_app_actions_and_safe_request_ids() {
         assert!(matches!(
-            parse_args_for(&args(&["notes.list"]), true),
+            parse_args_for(&args(&["folders.list"]), true),
             Ok(Parsed::Call(_, _, _))
         ));
         for action in ["sessions.read", "sessions.send", "sessions.draft"] {
@@ -538,8 +528,6 @@ mod tests {
         assert!(
             parse_args_for(&args(&["sessions.start", "--request-id", "bad/id"]), true).is_err()
         );
-        assert!(app_help().contains("notes.read"));
-        assert!(app_help().contains("notes.write"));
         for action in ["worktrees.list", "worktrees.create"] {
             assert!(matches!(
                 parse_args_for(&args(&[action]), true),

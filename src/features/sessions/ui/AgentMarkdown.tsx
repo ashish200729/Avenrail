@@ -139,7 +139,7 @@ function fileLinkMenuItems(
   return [
     {
       kind: "item",
-      id: "open-monocode",
+      id: "open-avenrail",
       label: "Open in Avenrail",
       disabled: !canOpenInAvenrail,
     },
@@ -569,7 +569,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
     setFileMenu(null);
     setFileActionError(null);
 
-    if (id === "open-monocode") {
+    if (id === "open-avenrail") {
       if (fileMenu.navigation) onOpenFile?.(path, fileMenu.navigation);
       else onOpenFile?.(path);
       return;

@@ -844,13 +844,13 @@ mod tests {
                 .unwrap();
         assert_eq!(config_go_api_key(&value), None);
 
-        std::env::set_var("MONOCODE_TEST_GO_KEY", "sk-go-env");
+        std::env::set_var("AVENRAIL_TEST_GO_KEY", "sk-go-env");
         let value: Value = serde_json::from_str(
-            r#"{"provider":{"opencode-go":{"options":{"apiKey":"{env:MONOCODE_TEST_GO_KEY}"}}}}"#,
+            r#"{"provider":{"opencode-go":{"options":{"apiKey":"{env:AVENRAIL_TEST_GO_KEY}"}}}}"#,
         )
         .unwrap();
         assert_eq!(config_go_api_key(&value).as_deref(), Some("sk-go-env"));
-        std::env::remove_var("MONOCODE_TEST_GO_KEY");
+        std::env::remove_var("AVENRAIL_TEST_GO_KEY");
     }
 
     #[test]

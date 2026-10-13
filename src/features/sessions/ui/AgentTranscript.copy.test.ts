@@ -32,7 +32,7 @@ it("shows the user's send time next to the message actions", () => {
 });
 
 beforeEach(() => {
-  localStorage.setItem("monocode.transcriptLayout", "chat");
+  localStorage.setItem("avenrail.transcriptLayout", "chat");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   // Measurements here are driven explicitly; the observer never reports.
   vi.stubGlobal(
@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  localStorage.removeItem("monocode.transcriptLayout");
+  localStorage.removeItem("avenrail.transcriptLayout");
   act(() => root.unmount());
   container.remove();
   vi.restoreAllMocks();

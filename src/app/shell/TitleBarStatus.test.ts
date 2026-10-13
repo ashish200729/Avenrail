@@ -34,10 +34,6 @@ function render(tabs: Tab[]) {
         cwd: "/project",
         onToggleSidebar: vi.fn(),
         onNew: vi.fn(),
-        onSelect: vi.fn(),
-        onClose: vi.fn(),
-        onCloseMany: vi.fn(),
-        onReorder: vi.fn(),
       }),
     ),
   );
@@ -57,46 +53,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("title tab response status", () => {
-  it("shows a teal completion check until the response is seen", () => {
-    render([tab("done", { doneHarnesses: ["codex"] }), tab("active")]);
-
-    const doneTab = container.querySelector('[data-title-tab-id="done"]')!;
-    expect(
-      doneTab.querySelector('[data-harness-status="done"]'),
-    ).not.toBeNull();
-    expect(
-      doneTab.querySelector("svg")?.classList.contains("text-teal-400"),
-    ).toBe(true);
-    expect(
-      doneTab.querySelector("button")?.getAttribute("aria-label"),
-    ).toContain("Response complete");
-
-    render([tab("done"), tab("active")]);
-    expect(
-      container.querySelector(
-        '[data-title-tab-id="done"] [data-harness-status="idle"]',
-      ),
-    ).not.toBeNull();
-  });
-
-  it("keeps the loading indicator ahead of completion for the same provider", () => {
-    render([
-      tab("working", {
-        busyHarnesses: ["codex"],
-        doneHarnesses: ["codex"],
-      }),
-      tab("active"),
-    ]);
-
-    expect(
-      container.querySelector(
-        '[data-title-tab-id="working"] [data-harness-status="busy"]',
-      ),
-    ).not.toBeNull();
-  });
-});
-
 it.each([true, false])(
   "offers a toggle for the unified project sidebar when the rail is %s",
   (projectRailOpen) => {
@@ -113,10 +69,6 @@ it.each([true, false])(
           onToggleSidebar,
           onToggleSessionSidebar,
           onNew: vi.fn(),
-          onSelect: vi.fn(),
-          onClose: vi.fn(),
-          onCloseMany: vi.fn(),
-          onReorder: vi.fn(),
         }),
       ),
     );
@@ -148,10 +100,6 @@ it.each([
         onToggleSidebar: vi.fn(),
         onToggleSessionSidebar: vi.fn(),
         onNew,
-        onSelect: vi.fn(),
-        onClose: vi.fn(),
-        onCloseMany: vi.fn(),
-        onReorder: vi.fn(),
       }),
     ),
   );
@@ -162,7 +110,7 @@ it.each([
   if (!state.projectRailOpen) {
     expect(actions[0].closest("[data-new-session-action]")).not.toBeNull();
     const position = actions[0].compareDocumentPosition(
-      container.querySelector("[data-title-tab-id]")!,
+      container.querySelector("[data-title-bar-title]")!,
     );
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     act(() => actions[0].click());
@@ -175,4 +123,76 @@ it.each([
       container.innerHTML,
     );
   }
+});
+
+describe("title bar without a tab strip", () => {
+  function renderBar(props: Partial<Parameters<typeof TitleBar>[0]> = {}) {
+    act(() =>
+      root.render(
+        createElement(TitleBar, {
+          tabs: [
+            tab("first", { title: "Fix the sidebar" }),
+            tab("second", { title: "Other chat" }),
+          ],
+          activeId: "first",
+          cwd: "/project",
+          onToggleSidebar: vi.fn(),
+          onNew: vi.fn(),
+          ...props,
+        }),
+      ),
+    );
+  }
+
+  it("names only the active session and never renders session tabs", () => {
+    renderBar();
+    expect(container.querySelector("[data-title-tab-strip]")).toBeNull();
+    expect(container.querySelector("[data-title-tab-id]")).toBeNull();
+    const title = container.querySelector("[data-title-bar-title]")!;
+    expect(title.textContent).toContain("Fix the sidebar");
+    expect(container.textContent).not.toContain("Other chat");
+  });
+
+  it("keeps the panel toggle in the bar until the panel owns the top row", () => {
+    const onToggleWorkspacePanel = vi.fn();
+    renderBar({ onToggleWorkspacePanel, workspacePanelOpen: false });
+    const toggle = container.querySelector<HTMLButtonElement>(
+      "#workspace-panel-toggle",
+    );
+    expect(toggle?.getAttribute("aria-label")).toBe("Show workspace tools");
+    act(() => toggle?.click());
+    expect(onToggleWorkspacePanel).toHaveBeenCalledOnce();
+
+    renderBar({
+      onToggleWorkspacePanel,
+      workspacePanelOpen: true,
+      workspacePanelAtTop: true,
+    });
+    expect(container.querySelector("#workspace-panel-toggle")).toBeNull();
+  });
+
+  it("joins compact navigation with the session title", () => {
+    const onGoBack = vi.fn();
+    renderBar({
+      projectRailOpen: false,
+      compactRail: true,
+      canGoBack: true,
+      canGoForward: true,
+      onGoBack,
+      onGoForward: vi.fn(),
+    });
+    const nav = container.querySelector<HTMLElement>(
+      "[data-compact-title-nav]",
+    )!;
+    expect(nav.closest("header")?.className).toContain("body-glass");
+    expect(nav.className).toContain("pl-[70px]");
+    expect(
+      Array.from(nav.querySelectorAll("button"), (button) =>
+        button.getAttribute("aria-label")?.replace(/ \(.+\)$/, ""),
+      ),
+    ).toEqual(["Back", "Forward"]);
+    expect(container.textContent).not.toContain("Development");
+    act(() => nav.querySelector<HTMLButtonElement>("button")!.click());
+    expect(onGoBack).toHaveBeenCalledOnce();
+  });
 });

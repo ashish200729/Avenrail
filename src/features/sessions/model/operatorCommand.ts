@@ -5,10 +5,9 @@ export const OPERATOR_COMMAND: BuiltinSkill = {
   kind: "builtin",
   name: "operator",
   invocation: "operator",
-  description:
-    "Give this thread access to Avenrail sessions, folders, and notes.",
+  description: "Give this thread access to Avenrail sessions and folders.",
   scope: "builtin",
-  source: "monocode",
+  source: "avenrail",
 };
 
 /** Activate app access with a leading composer command. */
@@ -31,7 +30,9 @@ export function isOperatorUserTurn(block: Block): boolean {
     !block.draft &&
     !block.internal &&
     // This persisted field keeps its original name for saved session compatibility.
-    (block.monocode === true || LEGACY_COMMAND.test(block.text))
+    (block.avenrail === true ||
+      block.monocode === true ||
+      LEGACY_COMMAND.test(block.text))
   );
 }
 

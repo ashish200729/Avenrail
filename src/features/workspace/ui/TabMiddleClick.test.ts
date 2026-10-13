@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
-import { act, createElement, useState, type ComponentProps } from "react";
+import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SurfaceTabs } from "./SurfaceTabs";
-import { TitleBar, type Tab } from "../../../app/shell/TitleBar";
 
-vi.mock("../../../app/shell/WindowControls", () => ({ WindowControls: () => null }));
+vi.mock("../../../app/shell/WindowControls", () => ({
+  WindowControls: () => null,
+}));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -82,70 +83,36 @@ function layoutTabs(elements: HTMLElement[]) {
   });
 }
 
-function workspaceTab(id: string): Tab {
-  return {
-    id,
-    project: "project",
-    title: id,
-    more: [],
-    sessionCount: 1,
-    harnesses: [],
-    busyHarnesses: [],
-    files: [],
-  };
-}
-
-function renderTabs(
-  kind: "workspace" | "file" | "terminal",
-  activeId = "first",
-) {
+function renderTabs(kind: "file" | "terminal", activeId = "first") {
   const onClose = vi.fn();
   const onSelect = vi.fn();
   const onReorder = vi.fn();
-  if (kind === "workspace") {
-    act(() =>
-      root.render(
-        createElement(TitleBar, {
-          tabs: [workspaceTab("first"), workspaceTab("second")],
-          activeId,
+  act(() =>
+    root.render(
+      createElement(SurfaceTabs, {
+        files: ["first", "second"].map((id) => ({
+          id,
+          path: id,
           cwd: "/project",
-          onToggleSidebar: vi.fn(),
-          onNew: vi.fn(),
-          onSelect,
-          onClose,
-          onCloseMany: vi.fn(),
-          onReorder,
-        }),
-      ),
-    );
-  } else {
-    act(() =>
-      root.render(
-        createElement(SurfaceTabs, {
-          files: ["first", "second"].map((id) => ({
-            id,
-            path: id,
-            cwd: "/project",
-            ...(kind === "terminal"
-              ? { terminal: true, foreground: "vite" }
-              : {}),
-          })),
-          activeFileId: activeId,
-          dirtyFileIds: new Set(kind === "file" ? ["second"] : []),
-          fileErrorCounts: new Map(),
-          onSelectFile: onSelect,
-          onCloseFile: onClose,
-          onReorder,
-        }),
-      ),
-    );
-  }
+          ...(kind === "terminal"
+            ? { terminal: true, foreground: "vite" }
+            : {}),
+        })),
+        activeFileId: activeId,
+        dirtyFileIds: new Set(kind === "file" ? ["second"] : []),
+        fileErrorCounts: new Map(),
+        onSelectFile: onSelect,
+        onCloseFile: onClose,
+        onReorder,
+      }),
+    ),
+  );
   const closeButton = container.querySelector('[aria-label="Close second"]')!;
   const tab = closeButton.parentElement!.querySelector("button")!;
   return { onClose, onSelect, onReorder, tab, closeButton };
 }
 
-describe.each(["workspace", "file", "terminal"] as const)(
+describe.each(["file", "terminal"] as const)(
   "%s tab mouse gestures",
   (kind) => {
     it("moves neighboring tabs during a drag and saves the order after settling", () => {
@@ -199,34 +166,22 @@ describe.each(["workspace", "file", "terminal"] as const)(
             onClose(id);
             setIds((current) => current.filter((entry) => entry !== id));
           };
-          return kind === "workspace"
-            ? createElement(TitleBar, {
-                tabs: ids.map(workspaceTab),
-                activeId,
-                cwd: "/project",
-                onToggleSidebar: vi.fn(),
-                onNew: vi.fn(),
-                onSelect: setActiveId,
-                onClose: close,
-                onCloseMany: vi.fn(),
-                onReorder: reorder,
-              })
-            : createElement(SurfaceTabs, {
-                files: ids.map((id) => ({
-                  id,
-                  path: id,
-                  cwd: "/project",
-                  ...(kind === "terminal"
-                    ? { terminal: true, foreground: "vite" }
-                    : {}),
-                })),
-                activeFileId: activeId,
-                dirtyFileIds: new Set<string>(),
-                fileErrorCounts: new Map<string, number>(),
-                onSelectFile: setActiveId,
-                onCloseFile: close,
-                onReorder: reorder,
-              });
+          return createElement(SurfaceTabs, {
+            files: ids.map((id) => ({
+              id,
+              path: id,
+              cwd: "/project",
+              ...(kind === "terminal"
+                ? { terminal: true, foreground: "vite" }
+                : {}),
+            })),
+            activeFileId: activeId,
+            dirtyFileIds: new Set<string>(),
+            fileErrorCounts: new Map<string, number>(),
+            onSelectFile: setActiveId,
+            onCloseFile: close,
+            onReorder: reorder,
+          });
         }
 
         try {
@@ -237,7 +192,8 @@ describe.each(["workspace", "file", "terminal"] as const)(
             ),
           );
           layoutTabs(closeButtons.map((button) => button.parentElement!));
-          const second = closeButtons[1].parentElement!.querySelector("button")!;
+          const second =
+            closeButtons[1].parentElement!.querySelector("button")!;
           pointer(second, "pointerdown", 150);
           pointer(window, "pointermove", 30);
           act(() => vi.advanceTimersByTime(32));
@@ -341,23 +297,3 @@ describe.each(["workspace", "file", "terminal"] as const)(
     });
   },
 );
-
-it("keeps the sole blank workspace tab open", () => {
-  const onClose = vi.fn();
-  const props: ComponentProps<typeof TitleBar> = {
-    tabs: [{ ...workspaceTab("blank"), blank: true }],
-    activeId: "blank",
-    cwd: "/project",
-    onToggleSidebar: vi.fn(),
-    onNew: vi.fn(),
-    onSelect: vi.fn(),
-    onClose,
-    onCloseMany: vi.fn(),
-    onReorder: vi.fn(),
-  };
-  act(() => root.render(createElement(TitleBar, props)));
-  const tab = container.querySelector('[aria-label="project · blank"]')!;
-  expect(tab).not.toBeNull();
-  click(tab, 1);
-  expect(onClose).not.toHaveBeenCalled();
-});

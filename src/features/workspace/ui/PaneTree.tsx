@@ -8,13 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { setGrabbing, suppressTextSelection } from "../../../shared/lib/drag";
-import {
-  paneDropFromPoint,
-  setExternalTitleTabDrop,
-  titleTabDropFromPoint,
-  useExternalPaneDrop,
-  type TitleTabDropPosition,
-} from "../model/paneDrop";
+import { paneDropFromPoint, useExternalPaneDrop } from "../model/paneDrop";
 import type {
   ApprovalDecision,
   UserQuestionReply,
@@ -178,11 +172,6 @@ type Shared = {
     modelSettings: Record<string, string>,
   ) => void;
   onMovePane: (fromId: string, toId: string, edge: PaneEdge) => void;
-  onDetachPane: (
-    paneId: string,
-    targetTabId: string,
-    position: TitleTabDropPosition,
-  ) => void;
   onNewTerminal: (sessionId: string) => void;
   onTerminalMetaChange?: (fileId: string, patch: TerminalMetaPatch) => void;
   transcriptPool?: TranscriptPool;
@@ -268,7 +257,6 @@ function PaneTreeComponent({
   onBtwModelChange,
   onHandoff,
   onMovePane,
-  onDetachPane,
   onNewTerminal,
   onTerminalMetaChange,
   transcriptPool,
@@ -282,8 +270,6 @@ function PaneTreeComponent({
   const drop = paneDrag ?? externalDrop;
   const onMovePaneRef = useRef(onMovePane);
   onMovePaneRef.current = onMovePane;
-  const onDetachPaneRef = useRef(onDetachPane);
-  onDetachPaneRef.current = onDetachPane;
   const onFocusRef = useRef(onFocus);
   onFocusRef.current = onFocus;
 
@@ -340,12 +326,6 @@ function PaneTreeComponent({
           onFocusRef.current(fromId);
           setPaneDrag({ fromId, overId: null, edge: "left" });
         }
-        const titleTab = titleTabDropFromPoint(ev.clientX, ev.clientY);
-        setExternalTitleTabDrop(titleTab ? { fromId, ...titleTab } : null);
-        if (titleTab) {
-          setPaneDrag({ fromId, overId: null, edge: "left" });
-          return;
-        }
         const over = paneDropFromPoint(ev.clientX, ev.clientY);
         if (!over || over.id === fromId) {
           setPaneDrag({
@@ -373,22 +353,12 @@ function PaneTreeComponent({
         restoreSelection();
         setGrabbing(false);
         setPaneDrag(null);
-        setExternalTitleTabDrop(null);
         try {
           handle.releasePointerCapture(pointerId);
         } catch {
           /* already released */
         }
         if (!active || !commit) return;
-        const titleTab = titleTabDropFromPoint(lastX, lastY);
-        if (titleTab) {
-          onDetachPaneRef.current(
-            fromId,
-            titleTab.targetTabId,
-            titleTab.position,
-          );
-          return;
-        }
         const over = paneDropFromPoint(lastX, lastY);
         if (over && over.id !== fromId) {
           onMovePaneRef.current(fromId, over.id, over.edge);

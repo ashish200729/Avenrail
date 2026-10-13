@@ -126,7 +126,7 @@ let deletedSessions: string[];
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   localStorage.clear();
-  localStorage.setItem("monocode.modelControls", "beside");
+  localStorage.setItem("avenrail.modelControls", "beside");
   commands = [];
   host = undefined;
   syncDelay = undefined;
@@ -846,7 +846,7 @@ it("creates a host worktree through the composer and selects it", async () => {
       params: expect.objectContaining({
         projectId: "project",
         cwd: "/home/me/repo",
-        branch: expect.stringMatching(/^mc\/[a-z0-9]+$/),
+        branch: expect.stringMatching(/^av\/[a-z0-9]+$/),
         base: "dev",
         existing: false,
       }),

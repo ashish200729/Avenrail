@@ -76,9 +76,9 @@ describe("tool error disclosure", () => {
 describe("Avenrail CLI disclosure", () => {
   it("shows a compact row without a disclosure for a successful call", () => {
     const command =
-      "/repo/target/debug/Avenrail.app/Contents/MacOS/monocode app notes.list";
+      "/repo/target/debug/Avenrail.app/Contents/MacOS/avenrail app notes.list";
     const blocks: Block[] = [
-      { id: "user", role: "user", text: "/monocode list notes" },
+      { id: "user", role: "user", text: "/avenrail list notes" },
       {
         id: "notes",
         role: "tool",
@@ -95,24 +95,24 @@ describe("Avenrail CLI disclosure", () => {
     );
 
     const row = container.querySelector<HTMLElement>(
-      '[data-monocode-tool-call="notes.list"]',
+      '[data-avenrail-tool-call="notes.list"]',
     );
     expect(row?.querySelector("button")).toBeNull();
     expect(row?.querySelector("pre")).toBeNull();
-    expect(row?.textContent).toContain("Ranmonocode app notes.list");
+    expect(row?.textContent).toContain("Ranavenrail app notes.list");
     expect(row?.querySelector('img[src="/avenrail.svg"]')).not.toBeNull();
     expect(row?.querySelector(".bg-content\\/6")).not.toBeNull();
-    expect(container.textContent).not.toContain("Contents/MacOS/monocode");
+    expect(container.textContent).not.toContain("Contents/MacOS/avenrail");
     expect(container.textContent).not.toContain('"title":"Ideas"');
   });
 
   it("reveals a failed call's error when clicked", () => {
     const blocks: Block[] = [
-      { id: "user", role: "user", text: "/monocode list notes" },
+      { id: "user", role: "user", text: "/avenrail list notes" },
       {
         id: "notes",
         role: "tool",
-        text: "monocode app notes.list",
+        text: "avenrail app notes.list",
         tool: { kind: "shell", status: "failed", detail: "Connection refused" },
       },
     ];
